@@ -1,15 +1,21 @@
 """
-wikimedia_ingest.py (fixed)
-Downloads K-12-friendly RASTER images from Wikimedia Commons and inserts them into ChromaDB.
+wikimedia_ingest.py (UPDATED - session + warmup + thumbs + metadata sanitizing)
 
-Fixes:
-- Verifies download is an actual image via Content-Type + status
-- Skips SVG/PDF and other non-raster formats (these often trigger PIL errors)
-- Uses streaming download + safe temp filenames
-- Adds basic error handling so one bad file won’t stop the run
+Fixes Chroma error:
+  argument 'metadatas': Cannot convert Python object to MetadataValue
+
+Cause:
+- Wikimedia extmetadata fields can contain HTML or non-primitive values.
+- Chroma only allows str/int/float/bool in metadatas.
+
+This version:
+- casts metadata values to safe strings
+- removes None
+- limits long strings
 """
 
 import hashlib
+import re
 import time
 from pathlib import Path
 
@@ -25,6 +31,8 @@ except Exception:
     ImageLoader = None
 
 
+# ---------------- CONFIG ----------------
+
 DB_PATH = "./image_db"
 COLLECTION_NAME = "k12_education_images"
 
@@ -35,7 +43,6 @@ THUMB_DIR = SAVE_ROOT / "thumb"
 FULL_MAX_SIDE = 1200
 THUMB_MAX_SIDE = 256
 
-# SLOW DOWN to avoid bot blocks (increase if needed)
 SLEEP_BETWEEN_DOWNLOADS_SEC = 3.0
 
 ALLOWED_LICENSE_SUBSTRINGS = [
@@ -56,14 +63,13 @@ TOPICS = [
 
 API_URL = "https://commons.wikimedia.org/w/api.php"
 
-# Browser-ish headers (this is the key change)
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/122.0 Safari/537.36"
     ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,/;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://commons.wikimedia.org/",
     "Connection": "keep-alive",
@@ -71,9 +77,10 @@ HEADERS = {
     # "From": "your_email@example.com",
 }
 
-# One session for everything (keeps cookies)
 SESSION = requests.Session()
 SESSION.headers.update(HEADERS)
+
+# ----------------------------------------
 
 
 def ensure_dirs():
@@ -81,19 +88,61 @@ def ensure_dirs():
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
     SAVE_ROOT.mkdir(parents=True, exist_ok=True)
 
+
 def warmup_session():
-    # Grab cookies / establish a normal browsing pattern before downloading
     try:
         SESSION.get("https://commons.wikimedia.org/wiki/Main_Page", timeout=30)
         time.sleep(1.0)
     except Exception:
         pass
 
+
 def license_allowed(name: str | None) -> bool:
     if not name:
         return False
-    low = name.lower()
+    low = str(name).lower()
     return any(s in low for s in ALLOWED_LICENSE_SUBSTRINGS)
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _to_safe_str(v) -> str:
+    """
+    Convert any value to a safe short string:
+    - cast to str
+    - strip HTML tags (basic)
+    - collapse whitespace
+    - limit length
+    """
+    if v is None:
+        return ""
+    s = str(v)
+    s = _TAG_RE.sub(" ", s)  # remove html tags
+    s = re.sub(r"\s+", " ", s).strip()
+    # Chroma metadata values should be reasonably small
+    if len(s) > 500:
+        s = s[:500] + "…"
+    return s
+
+
+def safe_meta(d: dict) -> dict:
+    """
+    Ensure metadatas only contain primitives Chroma accepts:
+    - str/int/float/bool (no None, no dict/list)
+    """
+    out = {}
+    for k, v in (d or {}).items():
+        if v is None:
+            continue
+        # allow numeric/bool as-is
+        if isinstance(v, (int, float, bool)):
+            out[k] = v
+        else:
+            s = _to_safe_str(v)
+            if s != "":
+                out[k] = s
+    return out
 
 
 def resize_and_save(src: Path, dest: Path, max_side: int):
@@ -116,20 +165,16 @@ def get_collection():
 
 
 def search_commons(query: str, limit: int):
-    """
-    Pull results from the File namespace and request a raster thumbnail URL.
-    - thumburl should be a PNG/JPG even if the original is SVG.
-    """
     params = {
         "action": "query",
         "format": "json",
         "generator": "search",
         "gsrsearch": query,
         "gsrlimit": limit,
-        "gsrnamespace": 6,  # File namespace only
+        "gsrnamespace": 6,
         "prop": "imageinfo",
         "iiprop": "url|mime|extmetadata",
-        "iiurlwidth": FULL_MAX_SIDE,  # ensures thumburl is returned
+        "iiurlwidth": FULL_MAX_SIDE,  # makes thumburl appear
     }
     r = SESSION.get(API_URL, params=params, timeout=30)
     r.raise_for_status()
@@ -138,16 +183,12 @@ def search_commons(query: str, limit: int):
 
 
 def download(url: str, dest: Path) -> tuple[int, str]:
-    """
-    Download via the session; returns (status_code, content_type).
-    """
     try:
         with SESSION.get(url, stream=True, timeout=60, allow_redirects=True) as r:
             status = r.status_code
             ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
 
             if status != 200:
-                # Debug: show why blocked
                 print("DOWNLOAD FAIL", status, ctype, "for", url)
                 try:
                     print("Preview:", r.text[:160].replace("\n", " "))
@@ -162,7 +203,7 @@ def download(url: str, dest: Path) -> tuple[int, str]:
 
         return 200, ctype
     except Exception as e:
-        print("DOWNLOAD EXCEPTION", type(e)._name_, str(e)[:160], "for", url)
+        print("DOWNLOAD EXCEPTION", type(e).__name__, str(e)[:160], "for", url)
         return 0, ""
 
 
@@ -189,9 +230,9 @@ def main():
         print("\nSearching:", query)
 
         results = search_commons(query, limit)
+
         added_topic = 0
         skipped = {"no_thumburl": 0, "license": 0, "download": 0, "process": 0, "db": 0}
-
 
         for page in results:
             info = page.get("imageinfo", [{}])[0]
@@ -202,7 +243,7 @@ def main():
                 skipped["license"] += 1
                 continue
 
-            thumburl = info.get("thumburl")  # rasterized thumbnail
+            thumburl = info.get("thumburl")
             if not thumburl:
                 skipped["no_thumburl"] += 1
                 continue
@@ -216,7 +257,6 @@ def main():
             if status != 200:
                 skipped["download"] += 1
                 tmp.unlink(missing_ok=True)
-                # If blocked, back off harder
                 time.sleep(max(SLEEP_BETWEEN_DOWNLOADS_SEC, 6.0))
                 continue
 
@@ -238,26 +278,27 @@ def main():
             finally:
                 tmp.unlink(missing_ok=True)
 
-            metadata = {
+            raw_metadata = {
                 "subject": topic["subject"],
                 "topic": topic.get("topic", query),
-                "grade_min": topic["grade_min"],
-                "grade_max": topic["grade_max"],
+                "grade_min": int(topic["grade_min"]),
+                "grade_max": int(topic["grade_max"]),
                 "license": license_name,
                 "license_url": (meta.get("LicenseUrl", {}) or {}).get("value"),
                 "artist": (meta.get("Artist", {}) or {}).get("value"),
                 "credit": (meta.get("Credit", {}) or {}).get("value"),
-                "source_url": info.get("url"),  # original
-                "thumb_url": thumburl,          # what we downloaded
+                "source_url": info.get("url"),
+                "thumb_url": thumburl,
                 "source_page": f"https://commons.wikimedia.org/wiki/{page['title'].replace(' ', '_')}",
                 "review_status": "unreviewed",
             }
+            metadata = safe_meta(raw_metadata)
 
             try:
                 collection.add(ids=[_id], uris=[str(full_path)], metadatas=[metadata])
                 added_topic += 1
                 added_total += 1
-                print("Added:", full_path.name, "|", license_name)
+                print("Added:", full_path.name, "|", metadata.get("license", ""))
             except Exception as e:
                 print("DB ADD FAIL", str(e)[:160])
                 skipped["db"] += 1
@@ -271,5 +312,5 @@ def main():
     print("Total images in DB:", collection.count())
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
