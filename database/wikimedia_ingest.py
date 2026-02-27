@@ -35,6 +35,9 @@ THUMB_DIR = SAVE_ROOT / "thumb"
 FULL_MAX_SIDE = 1200
 THUMB_MAX_SIDE = 256
 
+# SLOW DOWN to avoid bot blocks (increase if needed)
+SLEEP_BETWEEN_DOWNLOADS_SEC = 3.0
+
 ALLOWED_LICENSE_SUBSTRINGS = [
     "public domain",
     "cc0",
@@ -45,14 +48,32 @@ ALLOWED_LICENSE_SUBSTRINGS = [
 ]
 
 TOPICS = [
-    {"query": "plant cell diagram", "subject": "Biology", "grade_min": 6, "grade_max": 8, "limit": 25},
-    {"query": "water cycle diagram", "subject": "Science", "grade_min": 4, "grade_max": 6, "limit": 25},
-    {"query": "fractions pie chart", "subject": "Math", "grade_min": 3, "grade_max": 5, "limit": 25},
-    {"query": "blank map united states", "subject": "Geography", "grade_min": 3, "grade_max": 8, "limit": 25},
+    {"query": "plant cell diagram", "subject": "Biology", "grade_min": 6, "grade_max": 8, "limit": 10},
+    {"query": "water cycle diagram", "subject": "Science", "grade_min": 4, "grade_max": 6, "limit": 10},
+    {"query": "fractions pie chart", "subject": "Math", "grade_min": 3, "grade_max": 5, "limit": 10},
+    {"query": "blank map united states", "subject": "Geography", "grade_min": 3, "grade_max": 8, "limit": 10},
 ]
 
 API_URL = "https://commons.wikimedia.org/w/api.php"
-HEADERS = {"User-Agent": "K12ImageIndexer/0.3 (local prototype; contact: you@example.com)"}
+
+# Browser-ish headers (this is the key change)
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,/;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://commons.wikimedia.org/",
+    "Connection": "keep-alive",
+    # Optional (good etiquette):
+    # "From": "your_email@example.com",
+}
+
+# One session for everything (keeps cookies)
+SESSION = requests.Session()
+SESSION.headers.update(HEADERS)
 
 
 def ensure_dirs():
@@ -60,6 +81,13 @@ def ensure_dirs():
     THUMB_DIR.mkdir(parents=True, exist_ok=True)
     SAVE_ROOT.mkdir(parents=True, exist_ok=True)
 
+def warmup_session():
+    # Grab cookies / establish a normal browsing pattern before downloading
+    try:
+        SESSION.get("https://commons.wikimedia.org/wiki/Main_Page", timeout=30)
+        time.sleep(1.0)
+    except Exception:
+        pass
 
 def license_allowed(name: str | None) -> bool:
     if not name:
@@ -89,11 +117,8 @@ def get_collection():
 
 def search_commons(query: str, limit: int):
     """
-    Returns pages with imageinfo including:
-      - url (original)
-      - thumburl (raster thumbnail)
-      - mime
-      - extmetadata (license/artist/etc)
+    Pull results from the File namespace and request a raster thumbnail URL.
+    - thumburl should be a PNG/JPG even if the original is SVG.
     """
     params = {
         "action": "query",
@@ -101,30 +126,44 @@ def search_commons(query: str, limit: int):
         "generator": "search",
         "gsrsearch": query,
         "gsrlimit": limit,
-        "gsrnamespace": 6,
+        "gsrnamespace": 6,  # File namespace only
         "prop": "imageinfo",
-        # request thumbnails (raster)
         "iiprop": "url|mime|extmetadata",
-        "iiurlwidth": FULL_MAX_SIDE,  # makes thumburl appear
+        "iiurlwidth": FULL_MAX_SIDE,  # ensures thumburl is returned
     }
-    r = requests.get(API_URL, params=params, headers=HEADERS, timeout=30)
+    r = SESSION.get(API_URL, params=params, timeout=30)
     r.raise_for_status()
     data = r.json()
     return list(data.get("query", {}).get("pages", {}).values())
 
 
-def download(url: str, dest: Path) -> bool:
+def download(url: str, dest: Path) -> tuple[int, str]:
+    """
+    Download via the session; returns (status_code, content_type).
+    """
     try:
-        with requests.get(url, headers=HEADERS, stream=True, timeout=60) as r:
-            if r.status_code != 200:
-                return False
+        with SESSION.get(url, stream=True, timeout=60, allow_redirects=True) as r:
+            status = r.status_code
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+
+            if status != 200:
+                # Debug: show why blocked
+                print("DOWNLOAD FAIL", status, ctype, "for", url)
+                try:
+                    print("Preview:", r.text[:160].replace("\n", " "))
+                except Exception:
+                    pass
+                return status, ctype
+
             with open(dest, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 128):
                     if chunk:
                         f.write(chunk)
-        return True
-    except Exception:
-        return False
+
+        return 200, ctype
+    except Exception as e:
+        print("DOWNLOAD EXCEPTION", type(e)._name_, str(e)[:160], "for", url)
+        return 0, ""
 
 
 def already_in_db(collection, _id: str) -> bool:
@@ -137,21 +176,22 @@ def already_in_db(collection, _id: str) -> bool:
 
 def main():
     ensure_dirs()
-    collection = get_collection()
+    warmup_session()
 
+    collection = get_collection()
     print("DB:", DB_PATH, "| Collection:", COLLECTION_NAME, "| Current:", collection.count())
 
     added_total = 0
 
     for topic in TOPICS:
         query = topic["query"]
-        limit = int(topic.get("limit", 20))
+        limit = int(topic.get("limit", 10))
         print("\nSearching:", query)
 
         results = search_commons(query, limit)
-
         added_topic = 0
         skipped = {"no_thumburl": 0, "license": 0, "download": 0, "process": 0, "db": 0}
+
 
         for page in results:
             info = page.get("imageinfo", [{}])[0]
@@ -162,8 +202,7 @@ def main():
                 skipped["license"] += 1
                 continue
 
-            # Use thumburl (rasterized). Works great for SVG diagrams too.
-            thumburl = info.get("thumburl")
+            thumburl = info.get("thumburl")  # rasterized thumbnail
             if not thumburl:
                 skipped["no_thumburl"] += 1
                 continue
@@ -173,9 +212,12 @@ def main():
                 continue
 
             tmp = SAVE_ROOT / f"tmp_{_id}"
-            if not download(thumburl, tmp):
+            status, _ctype = download(thumburl, tmp)
+            if status != 200:
                 skipped["download"] += 1
                 tmp.unlink(missing_ok=True)
+                # If blocked, back off harder
+                time.sleep(max(SLEEP_BETWEEN_DOWNLOADS_SEC, 6.0))
                 continue
 
             full_path = FULL_DIR / f"{_id}.jpg"
@@ -188,7 +230,8 @@ def main():
                 skipped["process"] += 1
                 tmp.unlink(missing_ok=True)
                 continue
-            except Exception:
+            except Exception as e:
+                print("PROCESS FAIL", str(e)[:160])
                 skipped["process"] += 1
                 tmp.unlink(missing_ok=True)
                 continue
@@ -214,10 +257,12 @@ def main():
                 collection.add(ids=[_id], uris=[str(full_path)], metadatas=[metadata])
                 added_topic += 1
                 added_total += 1
-            except Exception:
+                print("Added:", full_path.name, "|", license_name)
+            except Exception as e:
+                print("DB ADD FAIL", str(e)[:160])
                 skipped["db"] += 1
 
-            time.sleep(0.35)
+            time.sleep(SLEEP_BETWEEN_DOWNLOADS_SEC)
 
         print(f"Added for topic: {added_topic}")
         print("Skipped:", skipped)
