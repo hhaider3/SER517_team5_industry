@@ -1,22 +1,15 @@
 """
-search_k12_db.py
-Search your local Chroma K–12 image database.
-
-Usage:
-  python search_k12_db.py "water cycle diagram"
-  python search_k12_db.py "fractions" --grade 4 --n 8
-  python search_k12_db.py "blank us map" --subject Geography --n 5
-
-Notes:
-- This uses OpenCLIPEmbeddingFunction (same as your ingest script).
-- Grade is used as a *soft rerank* (doesn't hard-filter).
+search_k12_db.py (UPDATED)
+- Searches your Chroma K–12 image database
+- Soft rerank by grade + optional subject filter
+- Cleans HTML from Wikimedia attribution fields when printing
 """
 
 from __future__ import annotations
 
 import argparse
-import math
-from typing import Any, Dict, List, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional
 
 import chromadb
 from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
@@ -26,14 +19,22 @@ DB_PATH = "./image_db"
 COLLECTION_NAME = "k12_education_images"
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+
+def clean_html(text: Any, max_len: int = 220) -> str:
+    if text is None:
+        return ""
+    s = str(text)
+    s = _TAG_RE.sub(" ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) > max_len:
+        s = s[:max_len] + "…"
+    return s
+
+
 def _grade_score(meta: Dict[str, Any], grade: Optional[int]) -> float:
-    """
-    Higher is better. If grade is inside [grade_min, grade_max], strong bonus.
-    Otherwise penalize by distance.
-    """
     if grade is None:
         return 0.0
-
     try:
         gmin = int(meta.get("grade_min", 0))
         gmax = int(meta.get("grade_max", 12))
@@ -41,13 +42,10 @@ def _grade_score(meta: Dict[str, Any], grade: Optional[int]) -> float:
         return 0.0
 
     if gmin <= grade <= gmax:
-        # inside range: boost, closer to center slightly better
         center = (gmin + gmax) / 2.0
         return 2.0 - abs(grade - center) * 0.05
-    else:
-        # outside range: penalty by distance
-        dist = min(abs(grade - gmin), abs(grade - gmax))
-        return -0.25 * dist
+    dist = min(abs(grade - gmin), abs(grade - gmax))
+    return -0.25 * dist
 
 
 def _subject_match_score(meta: Dict[str, Any], subject: Optional[str]) -> float:
@@ -65,13 +63,9 @@ def _rerank(
     grade: Optional[int],
     subject: Optional[str],
 ) -> List[Dict[str, Any]]:
-    """
-    Combine vector distance (lower better) with grade/subject soft signals.
-    """
     out = []
     for _id, uri, meta, dist in zip(ids, uris, metas, distances):
-        # convert distance to a similarity-ish score
-        sim = -float(dist)  # higher is better
+        sim = -float(dist)  # lower distance -> higher sim
         score = sim + _grade_score(meta, grade) + _subject_match_score(meta, subject)
         out.append(
             {
@@ -98,13 +92,12 @@ def search_images(
         embedding_function=OpenCLIPEmbeddingFunction(),
     )
 
-    # Pull more than requested so rerank has room
     fetch_n = max(n * 4, 20)
 
     res = collection.query(
         query_texts=[query],
         n_results=fetch_n,
-        where={"subject": subject} if subject else None,  # hard filter only if you want
+        where={"subject": subject} if subject else None,
         include=["metadatas", "distances", "uris"],
     )
 
@@ -117,7 +110,6 @@ def search_images(
         return []
 
     ranked = _rerank(ids, uris, metas, dists, grade=grade, subject=subject)
-
     return ranked[:n]
 
 
@@ -128,17 +120,22 @@ def print_results(results: List[Dict[str, Any]]) -> None:
 
     for i, r in enumerate(results, start=1):
         m = r["metadata"] or {}
+
+        artist = clean_html(m.get("artist"))
+        credit = clean_html(m.get("credit"))
+
         print(f"\n#{i}  score={r['score']:.3f}  dist={r['distance']:.3f}")
         print("File:", r["uri"])
         print("Subject:", m.get("subject", ""))
         print("Topic:", m.get("topic", ""))
         print("Grades:", m.get("grade_min", ""), "-", m.get("grade_max", ""))
         print("License:", m.get("license", ""))
-        # Artist/Credit sometimes contain cleaned strings from your ingest sanitizer
-        if m.get("artist"):
-            print("Artist:", m.get("artist"))
-        if m.get("credit"):
-            print("Credit:", m.get("credit"))
+
+        if artist:
+            print("Artist:", artist)
+        if credit:
+            print("Credit:", credit)
+
         if m.get("source_page"):
             print("Source page:", m.get("source_page"))
 
