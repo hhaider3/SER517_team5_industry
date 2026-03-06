@@ -1,161 +1,198 @@
+#!/usr/bin/env python3
 """
-search_k12_db.py (UPDATED)
-- Searches your Chroma K–12 image database
-- Soft rerank by grade + optional subject filter
-- Cleans HTML from Wikimedia attribution fields when printing
+search_k12_db_optimized.py
+
+Optimized semantic search over the local K-12 image ChromaDB.
+
+Improvements:
+•⁠  ⁠Uses ChromaDB metadata filtering when possible (subject + optional strict grade overlap)
+•⁠  ⁠Optional "soft" grade re-ranking when strict filtering is off (default)
+•⁠  ⁠Cleaner output (compact/full)
+•⁠  ⁠Safer handling of missing metadata keys
+•⁠  ⁠Single DB query with includes (metadatas/distances/uris)
+
+Usage:
+  python3 search_k12_db_optimized.py "water cycle diagram" --grade 5 --n 6
+  python3 search_k12_db_optimized.py "fractions pie chart" --subject Math --grade 4 --n 10
+  python3 search_k12_db_optimized.py "blank map" --subject Geography --strict-grade --grade 6 --n 8
+  python3 search_k12_db_optimized.py "plant cell" --n 5 --compact
 """
 
-from __future__ import annotations
+from _future_ import annotations
 
 import argparse
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
 from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
 
+try:
+    from chromadb.utils.data_loaders import ImageLoader
+except Exception:
+    ImageLoader = None
 
-DB_PATH = "./image_db"
-COLLECTION_NAME = "k12_education_images"
-
+DB_PATH_DEFAULT = "./image_db"
+COLLECTION_DEFAULT = "k12_education_images"
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
-def clean_html(text: Any, max_len: int = 220) -> str:
-    if text is None:
-        return ""
-    s = str(text)
-    s = _TAG_RE.sub(" ", s)
+
+def clean_html(s: str) -> str:
+    s = _TAG_RE.sub(" ", s or "")
     s = re.sub(r"\s+", " ", s).strip()
-    if len(s) > max_len:
-        s = s[:max_len] + "…"
     return s
 
 
-def _grade_score(meta: Dict[str, Any], grade: Optional[int]) -> float:
+def to_int(v: Any, default: Optional[int] = None) -> Optional[int]:
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def build_where(subject: Optional[str], grade: Optional[int], strict_grade: bool) -> Optional[Dict[str, Any]]:
+    clauses: List[Dict[str, Any]] = []
+
+    if subject:
+        clauses.append({"subject": subject})
+
+    if strict_grade and grade is not None:
+        clauses.append({"grade_min": {"$lte": grade}})
+        clauses.append({"grade_max": {"$gte": grade}})
+
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$and": clauses}
+
+
+def grade_penalty(grade: Optional[int], gmin: Optional[int], gmax: Optional[int]) -> float:
     if grade is None:
         return 0.0
-    try:
-        gmin = int(meta.get("grade_min", 0))
-        gmax = int(meta.get("grade_max", 12))
-    except Exception:
-        return 0.0
-
+    if gmin is None or gmax is None:
+        return 0.15
     if gmin <= grade <= gmax:
-        center = (gmin + gmax) / 2.0
-        return 2.0 - abs(grade - center) * 0.05
-    dist = min(abs(grade - gmin), abs(grade - gmax))
-    return -0.25 * dist
-
-
-def _subject_match_score(meta: Dict[str, Any], subject: Optional[str]) -> float:
-    if not subject:
         return 0.0
-    ms = str(meta.get("subject", "")).strip().lower()
-    return 0.75 if ms == subject.strip().lower() else -0.10
+    d = min(abs(grade - gmin), abs(grade - gmax))
+    return min(1.5, 0.20 * d)
 
 
-def _rerank(
-    ids: List[str],
-    uris: List[str],
-    metas: List[Dict[str, Any]],
-    distances: List[float],
-    grade: Optional[int],
-    subject: Optional[str],
-) -> List[Dict[str, Any]]:
-    out = []
-    for _id, uri, meta, dist in zip(ids, uris, metas, distances):
-        sim = -float(dist)  # lower distance -> higher sim
-        score = sim + _grade_score(meta, grade) + _subject_match_score(meta, subject)
-        out.append(
-            {
-                "id": _id,
-                "uri": uri,
-                "distance": float(dist),
-                "score": float(score),
-                "metadata": meta,
-            }
-        )
-    out.sort(key=lambda x: x["score"], reverse=True)
-    return out
+def combine_score(distance: float, penalty: float) -> float:
+    sim = 1.0 / (1.0 + max(0.0, float(distance)))
+    return sim - penalty
 
 
-def search_images(
-    query: str,
-    n: int = 8,
-    grade: Optional[int] = None,
-    subject: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    client = chromadb.PersistentClient(path=DB_PATH)
-    collection = client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=OpenCLIPEmbeddingFunction(),
-    )
+def get_collection(db_path: str, collection_name: str):
+    client = chromadb.PersistentClient(path=db_path)
+    embedder = OpenCLIPEmbeddingFunction()
 
-    fetch_n = max(n * 4, 20)
+    kwargs = dict(name=collection_name, embedding_function=embedder)
+    if ImageLoader:
+        kwargs["data_loader"] = ImageLoader()
 
-    res = collection.query(
-        query_texts=[query],
-        n_results=fetch_n,
-        where={"subject": subject} if subject else None,
+    return client.get_or_create_collection(**kwargs)
+
+
+def fmt_range(gmin: Any, gmax: Any) -> str:
+    if gmin is None and gmax is None:
+        return "N/A"
+    return f"{to_int(gmin, 0)} - {to_int(gmax, 12)}"
+
+
+def print_result(idx: int, score: float, dist: float, uri: str, md: Dict[str, Any], compact: bool):
+    subject = md.get("subject", "Unknown")
+    topic = md.get("topic", "")
+    gmin = md.get("grade_min")
+    gmax = md.get("grade_max")
+    license_name = md.get("license", "")
+    artist = clean_html(md.get("artist", ""))
+    credit = clean_html(md.get("credit", ""))
+    source_page = md.get("source_page", md.get("source_url", ""))
+
+    print(f"#{idx}  score={score:.3f}  dist={dist:.3f}")
+    print(f"File: {uri}")
+    print(f"Subject: {subject}")
+    if topic:
+        print(f"Topic: {topic}")
+    print(f"Grades: {fmt_range(gmin, gmax)}")
+    if license_name:
+        print(f"License: {clean_html(str(license_name))}")
+
+    if not compact:
+        if artist:
+            print(f"Artist: {artist}")
+        if credit:
+            print(f"Credit: {credit}")
+        if source_page:
+            print(f"Source page: {source_page}")
+
+    print()
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Optimized semantic search for local K-12 image DB.")
+    ap.add_argument("query", help="Search query text")
+    ap.add_argument("--db", default=DB_PATH_DEFAULT, help="ChromaDB persistent path (default: ./image_db)")
+    ap.add_argument("--collection", default=COLLECTION_DEFAULT, help="Collection name (default: k12_education_images)")
+    ap.add_argument("--n", type=int, default=6, help="Number of results to return (default: 6)")
+    ap.add_argument("--subject", default=None, help="Filter by subject (exact match), e.g. Math, Science")
+    ap.add_argument("--grade", type=int, default=None, help="Requested grade (used for filtering or re-ranking)")
+    ap.add_argument("--strict-grade", action="store_true",
+                    help="Only return results whose grade range includes --grade (DB filter).")
+    ap.add_argument("--compact", action="store_true", help="Compact output (hide long attribution fields).")
+    ap.add_argument("--fetch", type=int, default=None,
+                    help="Print only the file path for the Nth result (1-based). Useful for scripting.")
+
+    args = ap.parse_args()
+
+    col = get_collection(args.db, args.collection)
+
+    where = build_where(args.subject, args.grade, args.strict_grade)
+
+    raw_k = args.n if args.strict_grade else max(args.n * 5, args.n)
+
+    res = col.query(
+        query_texts=[args.query],
+        n_results=raw_k,
+        where=where,
         include=["metadatas", "distances", "uris"],
     )
 
     ids = (res.get("ids") or [[]])[0]
-    uris = (res.get("uris") or [[]])[0]
-    metas = (res.get("metadatas") or [[]])[0]
     dists = (res.get("distances") or [[]])[0]
+    mds = (res.get("metadatas") or [[]])[0]
+    uris = (res.get("uris") or [[]])[0]
 
     if not ids:
-        return []
-
-    ranked = _rerank(ids, uris, metas, dists, grade=grade, subject=subject)
-    return ranked[:n]
-
-
-def print_results(results: List[Dict[str, Any]]) -> None:
-    if not results:
-        print("No matches found.")
+        print("No results found.")
         return
 
-    for i, r in enumerate(results, start=1):
-        m = r["metadata"] or {}
+    ranked: List[Tuple[float, float, str, Dict[str, Any]]] = []
 
-        artist = clean_html(m.get("artist"))
-        credit = clean_html(m.get("credit"))
+    for dist, uri, md in zip(dists, uris, mds):
+        gmin = to_int(md.get("grade_min"), None)
+        gmax = to_int(md.get("grade_max"), None)
 
-        print(f"\n#{i}  score={r['score']:.3f}  dist={r['distance']:.3f}")
-        print("File:", r["uri"])
-        print("Subject:", m.get("subject", ""))
-        print("Topic:", m.get("topic", ""))
-        print("Grades:", m.get("grade_min", ""), "-", m.get("grade_max", ""))
-        print("License:", m.get("license", ""))
+        pen = 0.0 if args.strict_grade else grade_penalty(args.grade, gmin, gmax)
+        score = combine_score(float(dist), pen)
 
-        if artist:
-            print("Artist:", artist)
-        if credit:
-            print("Credit:", credit)
+        ranked.append((score, float(dist), uri, md))
 
-        if m.get("source_page"):
-            print("Source page:", m.get("source_page"))
+    ranked.sort(key=lambda x: x[0], reverse=True)
+    ranked = ranked[: args.n]
 
+    if args.fetch is not None:
+        i = args.fetch
+        if i < 1 or i > len(ranked):
+            raise SystemExit(f"--fetch must be between 1 and {len(ranked)}")
+        print(ranked[i - 1][2])
+        return
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("query", help="Search text, e.g. 'water cycle diagram'")
-    ap.add_argument("--n", type=int, default=8, help="Number of results")
-    ap.add_argument("--grade", type=int, default=None, help="Grade level (K=0). Example: --grade 5")
-    ap.add_argument("--subject", type=str, default=None, help="Optional subject filter (e.g. Math, Biology)")
-    args = ap.parse_args()
-
-    results = search_images(
-        query=args.query,
-        n=args.n,
-        grade=args.grade,
-        subject=args.subject,
-    )
-    print_results(results)
+    for i, (score, dist, uri, md) in enumerate(ranked, start=1):
+        print_result(i, score, dist, uri, md, compact=args.compact)
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
