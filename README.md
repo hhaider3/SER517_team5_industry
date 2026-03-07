@@ -15,9 +15,9 @@ Local image storage (./k12_images/full and ./k12_images/thumb)
 
 Included scripts:
 
-wikimedia_ingest.py — ingestion pipeline (supports search and category modes). Updated with backoff, mime filtering, and category crawling.
+wikimedia_ingest.py — ingestion pipeline using Wikimedia keyword search (predefined TOPICS list). Downloads images, creates full + thumbnail JPEGs, and inserts URIs + metadata into ChromaDB.
 
-search_k12_db.py — CLI search over the local Chroma database (grade-aware reranking).
+search_k12_db_optimized.py — CLI semantic search over the local ChromaDB (metadata filtering + optional strict grade overlap + soft grade-aware reranking).
 
 init_db.py (optional) — create/open Chroma collection (if you have one).
 
