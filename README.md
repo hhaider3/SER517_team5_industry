@@ -23,6 +23,8 @@ init_db.py (optional) — create/open Chroma collection (if you have one).
 
 k12_images/ — local image storage created by the ingest script.
 
+ingest_math_images.py - ingest_math_images.py is a Math-only ingestion runner that downloads K–12 math diagrams from Wikimedia Commons, saves them locally (full + thumbnail), and stores them in a persistent ChromaDB collection using OpenCLIP embeddings.
+
 image_db/ — Chroma persistent database folder created automatically.
 
 Quick start
