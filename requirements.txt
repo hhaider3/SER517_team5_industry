@@ -1,0 +1,17 @@
+# Core vector database
+chromadb>=0.4.24
+
+# HTTP requests (Wikimedia API + CDN)
+requests>=2.31.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Used internally by Chroma / embeddings (safe to pin explicitly)
+numpy>=1.24.0
+
+# Optional but recommended (reduces HF warnings and improves model downloads)
+huggingface-hub>=0.20.0
+
+# For CLI argument parsing (standard library but safe to include for some envs)
+# argparse is part of stdlib, no install required
