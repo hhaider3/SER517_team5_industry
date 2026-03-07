@@ -18,10 +18,11 @@ Usage:
   python3 search_k12_db_optimized.py "plant cell" --n 5 --compact
 """
 
-from _future_ import annotations
+from __future__ import annotations
 
 import argparse
 import re
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
@@ -31,6 +32,12 @@ try:
     from chromadb.utils.data_loaders import ImageLoader
 except Exception:
     ImageLoader = None
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 DB_PATH_DEFAULT = "./image_db"
 COLLECTION_DEFAULT = "k12_education_images"
@@ -48,6 +55,7 @@ def to_int(v: Any, default: Optional[int] = None) -> Optional[int]:
     try:
         return int(v)
     except Exception:
+        logger.debug("Failed to convert value to int: %s", v)
         return default
 
 
@@ -85,6 +93,8 @@ def combine_score(distance: float, penalty: float) -> float:
 
 
 def get_collection(db_path: str, collection_name: str):
+    logger.info("Connecting to ChromaDB")
+    logger.info("DB path: %s | Collection: %s", db_path, collection_name)
     client = chromadb.PersistentClient(path=db_path)
     embedder = OpenCLIPEmbeddingFunction()
 
@@ -92,7 +102,9 @@ def get_collection(db_path: str, collection_name: str):
     if ImageLoader:
         kwargs["data_loader"] = ImageLoader()
 
-    return client.get_or_create_collection(**kwargs)
+    collection = client.get_or_create_collection(**kwargs)
+    logger.info("Collection ready")
+    return collection
 
 
 def fmt_range(gmin: Any, gmax: Any) -> str:
@@ -132,6 +144,7 @@ def print_result(idx: int, score: float, dist: float, uri: str, md: Dict[str, An
 
 
 def main():
+    logger.info("Starting K-12 image search")
     ap = argparse.ArgumentParser(description="Optimized semantic search for local K-12 image DB.")
     ap.add_argument("query", help="Search query text")
     ap.add_argument("--db", default=DB_PATH_DEFAULT, help="ChromaDB persistent path (default: ./image_db)")
@@ -146,12 +159,15 @@ def main():
                     help="Print only the file path for the Nth result (1-based). Useful for scripting.")
 
     args = ap.parse_args()
+    logger.info("Query: %s", args.query)
+    logger.info("Filters | subject=%s grade=%s strict=%s", args.subject, args.grade, args.strict_grade)
 
     col = get_collection(args.db, args.collection)
 
     where = build_where(args.subject, args.grade, args.strict_grade)
 
     raw_k = args.n if args.strict_grade else max(args.n * 5, args.n)
+    logger.info("Running DB query | raw_results=%s", raw_k)
 
     res = col.query(
         query_texts=[args.query],
@@ -165,11 +181,15 @@ def main():
     mds = (res.get("metadatas") or [[]])[0]
     uris = (res.get("uris") or [[]])[0]
 
+    logger.info("Results returned from DB: %d", len(ids))
+
     if not ids:
+        logger.warning("No results found for query: %s", args.query)
         print("No results found.")
         return
 
     ranked: List[Tuple[float, float, str, Dict[str, Any]]] = []
+    logger.info("Ranking results")
 
     for dist, uri, md in zip(dists, uris, mds):
         gmin = to_int(md.get("grade_min"), None)
@@ -182,10 +202,13 @@ def main():
 
     ranked.sort(key=lambda x: x[0], reverse=True)
     ranked = ranked[: args.n]
+    logger.info("Top %d results selected", len(ranked))
 
     if args.fetch is not None:
+        logger.info("Fetch mode requested | result #%d", args.fetch)
         i = args.fetch
         if i < 1 or i > len(ranked):
+            logger.error("Fetch index out of range")
             raise SystemExit(f"--fetch must be between 1 and {len(ranked)}")
         print(ranked[i - 1][2])
         return
@@ -193,6 +216,8 @@ def main():
     for i, (score, dist, uri, md) in enumerate(ranked, start=1):
         print_result(i, score, dist, uri, md, compact=args.compact)
 
+    logger.info("Search completed successfully")
 
-if _name_ == "_main_":
+
+if __name__ == "_main_":
     main()
