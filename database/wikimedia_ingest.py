@@ -18,7 +18,7 @@ Usage:
     --start "Category:Mathematics" --max 200 --delay 3.0 --subject Math
 """
 
-from _future_ import annotations
+from __future__ import annotations
 
 import argparse
 import hashlib
@@ -28,6 +28,15 @@ import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 import requests
 from PIL import Image, UnidentifiedImageError
@@ -333,6 +342,7 @@ def crawl_categories_for_files(start_categories: List[str], max_files: int) -> I
         if cat in seen_cats:
             continue
         seen_cats.add(cat)
+        logger.info("Exploring category: %s", cat)
         print("Exploring category:", cat)
 
         for member in category_members(cat, cmtype="file|subcat", limit=200):
@@ -406,6 +416,7 @@ def process_page_into_db(
         return False
     except Exception as e:
         print("PROCESS FAIL", str(e)[:160])
+        logger.error("Image processing failed: %s", str(e)[:160])
         skipped["process"] += 1
         tmp.unlink(missing_ok=True)
         return False
@@ -436,6 +447,7 @@ def process_page_into_db(
         return True
     except Exception as e:
         print("DB ADD FAIL", str(e)[:160])
+        logger.error("Database insert failed: %s", str(e)[:160])
         skipped["db"] += 1
         time.sleep(delay_sec + random.uniform(0.0, 0.8))
         return False
@@ -447,6 +459,7 @@ def run_search_mode(delay_sec: float):
     ensure_dirs()
     warmup_session()
     collection = get_collection()
+    logger.info("Connected to collection: %s", COLLECTION_NAME)
 
     print("DB:", DB_PATH, "| Collection:", COLLECTION_NAME, "| Current:", collection.count())
     added_total = 0
@@ -457,7 +470,8 @@ def run_search_mode(delay_sec: float):
         subject = topic["subject"]
         grade_min = int(topic["grade_min"])
         grade_max = int(topic["grade_max"])
-
+        
+        logger.info("Searching topic: %s", query)
         print("\nSearching:", query)
         pages = search_commons(query, limit)
 
@@ -478,6 +492,7 @@ def run_search_mode(delay_sec: float):
             if ok:
                 added_topic += 1
                 added_total += 1
+                logger.info("Image added | subject=%s topic=%s", subject, query)
                 print("Added:", subject, "|", query)
 
         print(f"Added for topic: {added_topic}")
@@ -485,6 +500,9 @@ def run_search_mode(delay_sec: float):
 
     print("\nDone! Total added:", added_total)
     print("Total images in DB:", collection.count())
+    logger.info("Ingestion complete")
+    logger.info("Total images added: %d", added_total)
+    logger.info("Images in DB: %d", collection.count())
 
 
 def run_category_mode(
@@ -500,6 +518,7 @@ def run_category_mode(
     ensure_dirs()
     warmup_session()
     collection = get_collection()
+    logger.info("Connected to collection: %s", COLLECTION_NAME)
 
     print("DB:", DB_PATH, "| Collection:", COLLECTION_NAME, "| Current:", collection.count())
     print("Mode: category")
@@ -542,11 +561,15 @@ def run_category_mode(
     print("Total added:", added_total)
     print("Skipped:", skipped)
     print("Total images in DB:", collection.count())
+    logger.info("Ingestion complete")
+    logger.info("Total images added: %d", added_total)
+    logger.info("Images in DB: %d", collection.count())
 
 
 # ---------------- CLI ----------------
 
 def main():
+    logger.info("Starting Wikimedia ingestion")
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["search", "category"], default="search", help="Ingest mode")
     ap.add_argument("--delay", type=float, default=DEFAULT_DELAY_SEC, help="Seconds between downloads")
@@ -576,5 +599,5 @@ def main():
         )
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()
