@@ -1,127 +1,81 @@
-# SER517_team5_industry
-Team project for SER 517 by Team 5(industry)
+# SER517_team5_industry - K-12 Image Vector Database
 
-# K-12 Image Vector Database 
+A project for SER 517 by Team 5 (industry). 
 
-This repository builds and maintains a local, searchable K–12 educational image database using:
+This repository builds and maintains a local, searchable K–12 educational image database using the Wikimedia Commons API, ChromaDB, OpenCLIP, and local image storage.
 
-Wikimedia Commons API (for metadata and thumbnails)
+---
 
-ChromaDB (persistent vector store)
+## 🏗️ System Architecture: How It Works
 
-OpenCLIP (image/text embeddings)
+The system is broken down into three main phases:
 
-Local image storage (./k12_images/full and ./k12_images/thumb)
+1. **Data Ingestion (`wikimedia_ingest.py`):** Fetches file metadata from Wikimedia via keyword search or by crawling categories. It downloads images, rasterizes SVGs, resizes them, sanitizes the metadata, and filters out non-image MIME types.
+2. **Vector Storage (`init_db.py` & ChromaDB):** Uses `OpenCLIPEmbeddingFunction` to convert images into mathematical vectors. It inserts the image file URIs and metadata into a persistent ChromaDB collection (`k12_education_images`), while saving actual images locally to `./k12_images/full` and `./k12_images/thumb`.
+3. **Semantic Search (`search_k12_db_optimized.py`):** Takes a natural language text query, computes its embedding, and queries ChromaDB. It then re-ranks the closest visual matches using soft signals like grade and subject metadata.
 
-Included scripts:
+---
 
-wikimedia_ingest.py — ingestion pipeline using Wikimedia keyword search (predefined TOPICS list). Downloads images, creates full + thumbnail JPEGs, and inserts URIs + metadata into ChromaDB.
+## 🚀 Quick Start
 
-search_k12_db_optimized.py — CLI semantic search over the local ChromaDB (metadata filtering + optional strict grade overlap + soft grade-aware reranking).
-
-init_db.py (optional) — create/open Chroma collection (if you have one).
-
-k12_images/ — local image storage created by the ingest script.
-
-ingest_math_images.py - ingest_math_images.py is a Math-only ingestion runner that downloads K–12 math diagrams from Wikimedia Commons, saves them locally (full + thumbnail), and stores them in a persistent ChromaDB collection using OpenCLIP embeddings.
-
-image_db/ — Chroma persistent database folder created automatically.
-
-Quick start
-1. Create and activate virtual environment
+### 1. Environment Setup
+Create and activate your virtual environment:
+**Mac/Linux:**
+```bash
 python3 -m venv venv
 source venv/bin/activate
-2. Install Python dependencies
+Windows:
+
+PowerShell
+python -m venv venv
+.\venv\Scripts\activate
+2. Install Dependencies
+Install the required packages using the requirements file:
+
+Bash
 pip install -r requirements.txt
+(Optional but recommended): Export your Hugging Face token to reduce rate-limit warnings for OpenCLIP downloads:
 
-If you don’t have requirements.txt, install the main packages:
-
-pip install chromadb requests pillow
-
-Optional but recommended (reduces rate-limit warnings for OpenCLIP downloads):
-
+Bash
 export HF_TOKEN="your_huggingface_token_here"
-3. Prepare directories
+📥 Ingesting Data
+The ingestion pipeline respects Wikimedia politely by using maxlag, warmup page visits, and exponential backoff for HTTP 429/503 errors.
 
-The ingest script will create directories automatically, but you can inspect or create them manually:
+Mode A: Keyword Search (Default)
+Use this to ingest a small batch of predefined sample topics.
 
-./k12_images/full
-./k12_images/thumb
-./image_db
-How the system works (short)
-
-wikimedia_ingest.py fetches file metadata from Wikimedia (either by keyword search — search mode — or by crawling categories — category mode), downloads thumbnails (rasterized for SVGs), resizes images, sanitizes metadata, and inserts image file URI + metadata into ChromaDB using OpenCLIP embeddings.
-
-search_k12_db.py computes an embedding for your text query, queries ChromaDB, then re-ranks results by grade/subject soft signals and prints file paths and attribution metadata.
-
-Using wikimedia_ingest.py
-
-wikimedia_ingest.py supports two modes:
-
-Mode A — search (default)
-
-Use this to ingest a handful of sample topics (the file contains TOPICS with example queries).
-
-python wikimedia_ingest.py --mode search
-
-You can also tune delay:
-
+Bash
 python wikimedia_ingest.py --mode search --delay 4.0
-Mode B — category (crawl categories like Category:Mathematics)
+Mode B: Category Crawling (Building the Math Database)
+This is the recommended workflow for collecting specific subject images, like K-12 math diagrams. Start small and increase gradually.
 
-This is the mode for collecting math-related images. Start small and increase gradually.
+For Mac/Linux (Bash):
 
-Basic example:
-
+Bash
 python wikimedia_ingest.py --mode category \
   --start "Category:Mathematics" \
-  --max 200 \
+  --max 500 \
   --delay 5.0 \
   --thumb-width 640 \
   --subject Math \
   --topic-label "category ingest" \
   --grade-min 0 \
   --grade-max 12
+For Windows (PowerShell):
+Note: PowerShell uses backticks (`) instead of backslashes () for multiline commands.
 
-Parameters (category mode)
-
---start — one or more start categories, e.g. "Category:Mathematics" "Category:Mathematical diagrams".
-
---max — maximum number of files to add this run (recommended small at first: 200–1000).
-
---delay — base seconds to sleep between downloads. Increase to 5–10s if you see 429 errors.
-
---thumb-width — width (px) requested from Wikimedia for thumbnails (smaller reduces CDN load).
-
---subject / --topic-label / --grade-min / --grade-max — metadata values to apply to ingested images.
-
-Important behavior notes
-
-The script honors Wikimedia politely: warmup page visit, maxlag on API calls, and exponential backoff + Retry-After handling if the CDN returns 429/503.
-
-The script filters out non-image MIME types (video, audio), and will optionally accept PDFs if enabled in the code.
-
-Metadata is sanitized so it is compatible with ChromaDB (strings / numbers only).
-
-The script avoids re-adding files that are already in the DB.
-
-Using search_k12_db.py
-
-Basic usage:
-
-python search_k12_db.py "water cycle diagram" --n 6
-
-With grade and subject filters (grade used as soft re-rank):
-
-python search_k12_db.py "fractions pie chart" --grade 4 --subject Math --n 8
-
-Output includes: file path, subject, topic, grade range, license, cleaned artist/credit, and source page.
-
-Recommended workflow for building a large math collection
-
-Start with a curated seed list of math categories:
-
-Category:Mathematics
+PowerShell
+python wikimedia_ingest.py --mode category `
+  --start "Category:Mathematics" `
+  --max 500 `
+  --delay 5.0 `
+  --thumb-width 640 `
+  --subject Math `
+  --topic-label "category ingest" `
+  --grade-min 0 `
+  --grade-max 12
+Recommended Math Seed Categories:
+Once you build your base, try swapping the --start parameter with:
 
 Category:Mathematical diagrams
 
@@ -131,71 +85,49 @@ Category:Algebra
 
 Category:Mathematical notation
 
-Run the category mode with conservative parameters:
+🔍 Searching the Database
+Once you have images downloaded and embedded, you can query your local database. Output includes file paths, subjects, grade ranges, licenses, and attributions.
 
-python wikimedia_ingest.py --mode category --start "Category:Mathematics" --max 500 --delay 5.0 --thumb-width 640
+Basic Search:
 
-Monitor output; if you start seeing many DOWNLOAD RETRY or DOWNLOAD FAIL 429, increase --delay to 8–12s and/or reduce --thumb-width.
+Bash
+python search_k12_db_optimized.py "water cycle diagram" --n 6
+Filtered Search (Subject & Grade soft re-rank):
 
-After you have a local cache of commonly-used images, use search_k12_db.py to validate search quality and create an approval workflow (review review_status in metadata).
+Bash
+python search_k12_db_optimized.py "fractions pie chart" --grade 4 --subject Math --n 8
+⚠️ Common Troubleshooting
+Terminal Error: Missing expression after unary operator '--' or Unexpected token:
 
-For very large-scale indexing (10k+ metadata rows), switch to a catalog-first approach (collect metadata only in SQLite/Postgres, then download images on demand or via controlled workers). The current scripts are intended for initial/catalog+cache workflows.
+Cause: You are running a Bash-formatted multiline command (using \) inside Windows PowerShell.
 
-Storage & sizing
+Fix: Either write the command on a single continuous line, or replace all trailing backslashes (\) with backticks (`).
 
-Images saved as JPEG after resizing. Full images: up to 1200px longest side (configurable). Thumbnails: 256px.
+Terminal Error: DOWNLOAD RETRY or DOWNLOAD FAIL 429:
 
-Typical storage:
+Cause: Wikimedia is rate-limiting your connection.
 
-~0.3–1 MB per full image (varies).
+Fix: Increase the --delay parameter to 8.0 or 12.0 seconds and reduce the --thumb-width.
 
-Embeddings are small (a few KB each).
+Terminal Error: PIL.UnidentifiedImageError on resize:
 
-Rough estimate:
+Cause: Caused by downloading non-image blobs or incomplete downloads.
 
-10k images ≈ 3–10 GB total (images + embeddings)
+Fix: The script handles this safely and skips the image, but increasing the --delay can prevent incomplete downloads in the future.
 
-100k images ≈ 30–100 GB total
-Adjust based on desired resolution and thumbnail sizes.
+Terminal Error: DB ADD FAIL messages:
 
-Licensing & attribution
+Cause: Often caused by incorrect metadata types being passed to ChromaDB.
 
-The ingest pipeline filters images to only ingest those whose license contains one of the allowed substrings: public domain, cc0, cc by, cc by-sa.
+Fix: The current script automatically sanitizes metadata to avoid this, but check the error log output to see if an unexpected string format slipped through.
 
-The script stores license and attribution metadata (artist, credit, source page). You are responsible for showing proper attribution when redistributing images.
+HuggingFace rate warnings:
 
-If you want to expand or restrict licenses, edit ALLOWED_LICENSE_SUBSTRINGS in wikimedia_ingest.py.
+Cause: Downloading the OpenCLIP model without authentication.
 
-Handling rate limits and blocks
+Fix: Set HF_TOKEN in your environment variables.
 
-If Wikimedia responds with 429 (Too Many Requests) or other transient errors:
+⚖️ Licensing & Storage
+Licensing: The pipeline strictly filters images to ensure the license contains allowed substrings: public domain, cc0, cc by, or cc by-sa. You are responsible for showing proper attribution when redistributing.
 
-Increase --delay and/or --thumb-width (smaller thumbs).
-
-Re-run with a smaller --max and let the script complete; it will skip items already in DB.
-
-If you expect to run very large crawls, consider:
-
-Running several small jobs over time (cron / overnight).
-
-Adding a resume checkpoint (I can add a --resume-file flag to save progress).
-
-Using multiple IPs only if you are authorized (do not circumvent rate limits).
-
-Advanced: scaling tips
-
-Move metadata-only ingestion into a separate catalog (SQLite/Postgres) to store titles, thumb URLs, and metadata without downloading images. This allows large-scale coverage without heavy disk use.
-
-Implement on-demand caching: when a user searches, fetch and embed top N images at query time and store them locally.
-
-Consider a distributed worker queue with per-worker polite delays for high-throughput ingestion, plus a single shared catalog.
-
-Troubleshooting
-
-PIL.UnidentifiedImageError on resize — caused by downloading non-image blobs or incomplete downloads. Increase delay, or check the preview printed in the log. The updated script uses backoff and mime filtering to reduce these cases.
-
-Many DB ADD FAIL messages — inspect the error printed; often caused by incorrect metadata types (the updated script sanitizes metadata).
-
-HuggingFace rate warnings — set HF_TOKEN in your environment to avoid these warnings and increase embed weight download limits:
-
-export HF_TOKEN="your_token_here"
+Storage: Full images are up to 1200px; thumbnails are 256px. Rough sizing estimates: 10k images ≈ 3–10 GB total; 100k images ≈ 30–100 GB total.
