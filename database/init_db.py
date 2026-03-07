@@ -3,8 +3,15 @@ init_db.py
 Creates (or opens) a persistent ChromaDB collection for your K–12 image library.
 """
 
+import logging
 import chromadb
 from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 try:
     from chromadb.utils.data_loaders import ImageLoader
@@ -24,6 +31,11 @@ def main():
         kwargs["data_loader"] = ImageLoader()
 
     collection = client.get_or_create_collection(**kwargs)
+
+    logger.info("Database initialized successfully")
+    logger.info("DB path: %s", DB_PATH)
+    logger.info("Collection: %s", collection.name)
+    logger.info("Current image count: %d", collection.count())
 
     print("✅ Database Ready")
     print("Path:", DB_PATH)
