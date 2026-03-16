@@ -1,0 +1,19 @@
+WITH RECURSIVE CategoryTree AS (
+    -- Start with the root category 'Mathematics'
+    SELECT 'Mathematics' AS category_name
+    
+    UNION ALL
+    
+    -- Find all subcategories recursively
+    SELECT p.page_title AS category_name
+    FROM categorylinks cl
+    JOIN page p ON cl.cl_from = p.page_id
+    JOIN CategoryTree ct ON cl.cl_to = ct.category_name
+    WHERE cl.cl_type = 'subcat' AND p.page_namespace = 14
+)
+-- Get all files (Namespace 6) belonging to these categories
+SELECT DISTINCT p.page_title AS filename
+FROM categorylinks cl
+JOIN CategoryTree ct ON cl.cl_to = ct.category_name
+JOIN page p ON cl.cl_from = p.page_id
+WHERE cl.cl_type = 'file' AND p.page_namespace = 6;
