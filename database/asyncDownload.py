@@ -3,6 +3,7 @@ import aiohttp
 import aiofiles
 import hashlib
 import logging
+import urllib.parse
 from pathlib import Path
 
 INPUT_FILE = "math_filenames.txt"
@@ -16,7 +17,8 @@ def get_wikimedia_url(filename: str) -> str:
     """Reconstructs the Wikimedia Commons URL using MD5 hashing."""
     safe_filename = filename.replace(" ", "_")
     md5_hash = hashlib.md5(safe_filename.encode('utf-8')).hexdigest()
-    return f"https://upload.wikimedia.org/wikipedia/commons/{md5_hash[0]}/{md5_hash[:2]}/{safe_filename}"
+    encoded_filename = urllib.parse.quote(safe_filename)
+    return f"https://upload.wikimedia.org/wikipedia/commons/{md5_hash[0]}/{md5_hash[:2]}/{encoded_filename}"
 
 async def download_image(session: aiohttp.ClientSession, semaphore: asyncio.Semaphore, filename: str):
     """Downloads a single image asynchronously with retry logic."""
