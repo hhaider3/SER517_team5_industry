@@ -1,8 +1,9 @@
+
 WITH RECURSIVE CategoryTree AS (
     -- Start with the root category 'Mathematics'
     SELECT 'Mathematics' AS category_name
     
-    UNION ALL
+    UNION
     
     -- Find all subcategories recursively
     SELECT p.page_title AS category_name
