@@ -1,15 +1,12 @@
-#!/usr/bin/env python3
 """
-search_k12_db_optimized.py
+search_k12_db.py
+Semantic search over the local K-12 image ChromaDB.
 
-Optimized semantic search over the local K-12 image ChromaDB.
-
-Improvements:
-•⁠  ⁠Uses ChromaDB metadata filtering when possible (subject + optional strict grade overlap)
-•⁠  ⁠Optional "soft" grade re-ranking when strict filtering is off (default)
-•⁠  ⁠Cleaner output (compact/full)
-•⁠  ⁠Safer handling of missing metadata keys
-•⁠  ⁠Single DB query with includes (metadatas/distances/uris)
+Features:
+- ChromaDB metadata filtering by subject and grade
+- Optional soft grade re-ranking (default) or strict grade filtering
+- Compact or full output mode
+- Fetch mode for scripting
 
 Usage:
   python3 search_k12_db_optimized.py "water cycle diagram" --grade 5 --n 6
@@ -39,12 +36,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- Constants ---
 DB_PATH_DEFAULT = "./image_db"
 COLLECTION_DEFAULT = "k12_education_images"
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
-
+# --- Utility Functions ---
 def clean_html(s: str) -> str:
     s = _TAG_RE.sub(" ", s or "")
     s = re.sub(r"\s+", " ", s).strip()
@@ -91,7 +89,7 @@ def combine_score(distance: float, penalty: float) -> float:
     sim = 1.0 / (1.0 + max(0.0, float(distance)))
     return sim - penalty
 
-
+# --- Database ---
 def get_collection(db_path: str, collection_name: str):
     logger.info("Connecting to ChromaDB")
     logger.info("DB path: %s | Collection: %s", db_path, collection_name)
@@ -106,7 +104,7 @@ def get_collection(db_path: str, collection_name: str):
     logger.info("Collection ready")
     return collection
 
-
+# --- Output ---
 def fmt_range(gmin: Any, gmax: Any) -> str:
     if gmin is None and gmax is None:
         return "N/A"
@@ -219,5 +217,5 @@ def main():
     logger.info("Search completed successfully")
 
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     main()
