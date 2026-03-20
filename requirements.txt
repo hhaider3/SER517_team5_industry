@@ -10,6 +10,9 @@ Pillow>=10.0.0
 # Used internally by Chroma / embeddings (safe to pin explicitly)
 numpy>=1.24.0
 
+# Image embeddings (required by Chroma OpenCLIP)
+open-clip-torch>=2.20.0
+
 # Optional but recommended (reduces HF warnings and improves model downloads)
 huggingface-hub>=0.20.0
 
