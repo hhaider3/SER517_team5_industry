@@ -200,7 +200,7 @@ def main():
         return
 
     ranked: List[Tuple[float, float, str, Dict[str, Any]]] = []
-    logger.info("Ranking results")
+    logger.info("Ranking results (Hybrid Semantic + Keyword Metadata)")
 
     for dist, uri, md in zip(dists, uris, mds):
         gmin = to_int(md.get("grade_min"), None)
@@ -208,6 +208,22 @@ def main():
 
         pen = 0.0 if args.strict_grade else grade_penalty(args.grade, gmin, gmax)
         score = combine_score(float(dist), pen)
+
+        # Basic Hybrid Keyword Boosting (for Text Queries)
+        if args.query:
+            query_words = set(args.query.lower().split())
+            topic = str(md.get("topic") or "").lower()
+            subject = str(md.get("subject") or "").lower()
+            desc = str(md.get("description") or "").lower()
+            
+            for w in query_words:
+                if len(w) > 3: # Ignore short stop words
+                    if w in topic:
+                        score += 0.15
+                    if w in subject:
+                        score += 0.10
+                    if w in desc:
+                        score += 0.05
 
         ranked.append((score, float(dist), uri, md))
 
