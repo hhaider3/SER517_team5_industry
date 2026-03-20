@@ -46,14 +46,14 @@ Mode A: Keyword Search (Default)
 Use this to ingest a small batch of predefined sample topics.
 
 Bash
-python wikimedia_ingest.py --mode search --delay 4.0
+python database/wikimedia_ingest.py --mode search --delay 4.0
 Mode B: Category Crawling (Building the Math Database)
 This is the recommended workflow for collecting specific subject images, like K-12 math diagrams. Start small and increase gradually.
 
 For Mac/Linux (Bash):
 
 Bash
-python wikimedia_ingest.py --mode category \
+python database/wikimedia_ingest.py --mode category \
   --start "Category:Mathematics" \
   --max 500 \
   --delay 5.0 \
@@ -66,7 +66,7 @@ For Windows (PowerShell):
 Note: PowerShell uses backticks (`) instead of backslashes () for multiline commands.
 
 PowerShell
-python wikimedia_ingest.py --mode category `
+python database/wikimedia_ingest.py --mode category `
   --start "Category:Mathematics" `
   --max 500 `
   --delay 5.0 `
@@ -102,11 +102,11 @@ Once you have images downloaded and embedded, you can query your local database.
 Basic Search:
 
 Bash
-python search_k12_db_optimized.py "water cycle diagram" --n 6
+python database/search_k12_db.py "water cycle diagram" --n 6
 Filtered Search (Subject & Grade soft re-rank):
 
 Bash
-python search_k12_db_optimized.py "fractions pie chart" --grade 4 --subject Math --n 8
+python database/search_k12_db.py "fractions pie chart" --grade 4 --subject Math --n 8
 ⚠️ Common Troubleshooting
 Terminal Error: Missing expression after unary operator '--' or Unexpected token:
 
