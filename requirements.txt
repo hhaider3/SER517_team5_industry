@@ -15,3 +15,7 @@ huggingface-hub>=0.20.0
 
 # For CLI argument parsing (standard library but safe to include for some envs)
 # argparse is part of stdlib, no install required
+
+# Async downloads
+aiohttp>=3.9.0
+aiofiles>=23.2.1
