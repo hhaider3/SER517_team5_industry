@@ -1,12 +1,15 @@
+#!/usr/bin/env python3
 """
-search_k12_db.py
-Semantic search over the local K-12 image ChromaDB.
+search_k12_db_optimized.py
 
-Features:
-- ChromaDB metadata filtering by subject and grade
-- Optional soft grade re-ranking (default) or strict grade filtering
-- Compact or full output mode
-- Fetch mode for scripting
+Optimized semantic search over the local K-12 image ChromaDB.
+
+Improvements:
+•⁠  ⁠Uses ChromaDB metadata filtering when possible (subject + optional strict grade overlap)
+•⁠  ⁠Optional "soft" grade re-ranking when strict filtering is off (default)
+•⁠  ⁠Cleaner output (compact/full)
+•⁠  ⁠Safer handling of missing metadata keys
+•⁠  ⁠Single DB query with includes (metadatas/distances/uris)
 
 Usage:
   python3 search_k12_db_optimized.py "water cycle diagram" --grade 5 --n 6
@@ -15,15 +18,18 @@ Usage:
   python3 search_k12_db_optimized.py "plant cell" --n 5 --compact
 """
 
-from __future__ import annotations
+from _future_ import annotations
 
 import argparse
 import re
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import chromadb
 from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
+import numpy as np
+from PIL import Image
 
 try:
     from chromadb.utils.data_loaders import ImageLoader
@@ -34,15 +40,14 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
-# --- Constants ---
 DB_PATH_DEFAULT = "./image_db"
 COLLECTION_DEFAULT = "k12_education_images"
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
-# --- Utility Functions ---
+
 def clean_html(s: str) -> str:
     s = _TAG_RE.sub(" ", s or "")
     s = re.sub(r"\s+", " ", s).strip()
@@ -89,7 +94,7 @@ def combine_score(distance: float, penalty: float) -> float:
     sim = 1.0 / (1.0 + max(0.0, float(distance)))
     return sim - penalty
 
-# --- Database ---
+
 def get_collection(db_path: str, collection_name: str):
     logger.info("Connecting to ChromaDB")
     logger.info("DB path: %s | Collection: %s", db_path, collection_name)
@@ -104,7 +109,7 @@ def get_collection(db_path: str, collection_name: str):
     logger.info("Collection ready")
     return collection
 
-# --- Output ---
+
 def fmt_range(gmin: Any, gmax: Any) -> str:
     if gmin is None and gmax is None:
         return "N/A"
@@ -157,22 +162,55 @@ def main():
                     help="Print only the file path for the Nth result (1-based). Useful for scripting.")
 
     args = ap.parse_args()
+    
+    is_image_query = False
+    query_image_data = None
+    
+    if Path(args.query).is_file():
+        try:
+            with Image.open(args.query) as img:
+                query_image_data = np.array(img.convert("RGB"))
+            is_image_query = True
+            logger.info("Detected local image query: %s", args.query)
+        except Exception as e:
+            logger.warning("Query looks like file but PIL failed: %s", e)
+
+    inferred_subject = args.subject
+    if not inferred_subject and not is_image_query:
+        q_lower = args.query.lower()
+        if any(w in q_lower for w in ["math", "algebra", "geometry", "triangle", "fraction", "equation", "chart"]):
+            inferred_subject = "Math"
+        elif any(w in q_lower for w in ["science", "biology", "cell", "atom", "chemistry", "physics", "plant"]):
+            inferred_subject = "Science"
+        elif any(w in q_lower for w in ["history", "map", "geography", "war", "president", "country"]):
+            inferred_subject = "History/Geography"
+        if inferred_subject != args.subject:
+            logger.info("Inferred missing subject: %s", inferred_subject)
+
     logger.info("Query: %s", args.query)
-    logger.info("Filters | subject=%s grade=%s strict=%s", args.subject, args.grade, args.strict_grade)
+    logger.info("Filters | subject=%s grade=%s strict=%s", inferred_subject, args.grade, args.strict_grade)
 
     col = get_collection(args.db, args.collection)
 
-    where = build_where(args.subject, args.grade, args.strict_grade)
+    where = build_where(inferred_subject, args.grade, args.strict_grade)
 
     raw_k = args.n if args.strict_grade else max(args.n * 5, args.n)
     logger.info("Running DB query | raw_results=%s", raw_k)
 
-    res = col.query(
-        query_texts=[args.query],
-        n_results=raw_k,
-        where=where,
-        include=["metadatas", "distances", "uris"],
-    )
+    if is_image_query:
+        res = col.query(
+            query_images=[query_image_data],
+            n_results=raw_k,
+            where=where,
+            include=["metadatas", "distances", "uris"],
+        )
+    else:
+        res = col.query(
+            query_texts=[args.query],
+            n_results=raw_k,
+            where=where,
+            include=["metadatas", "distances", "uris"],
+        )
 
     ids = (res.get("ids") or [[]])[0]
     dists = (res.get("distances") or [[]])[0]
@@ -189,12 +227,20 @@ def main():
     ranked: List[Tuple[float, float, str, Dict[str, Any]]] = []
     logger.info("Ranking results")
 
+    query_words = set(re.findall(r'\w+', args.query.lower())) if not is_image_query else set()
+    
     for dist, uri, md in zip(dists, uris, mds):
         gmin = to_int(md.get("grade_min"), None)
         gmax = to_int(md.get("grade_max"), None)
 
         pen = 0.0 if args.strict_grade else grade_penalty(args.grade, gmin, gmax)
         score = combine_score(float(dist), pen)
+        
+        # Title/Keyword Boosting (Pseudo-BM25)
+        if not is_image_query:
+            meta_text = (str(md.get("topic", "")) + " " + str(md.get("source_page", "")) + " " + str(uri)).lower()
+            matches = sum(1 for w in query_words if len(w) > 3 and w in meta_text)
+            score += (matches * 0.05)
 
         ranked.append((score, float(dist), uri, md))
 
@@ -217,5 +263,5 @@ def main():
     logger.info("Search completed successfully")
 
 
-if __name__ == "__main__":
+if _name_ == "main":
     main()
