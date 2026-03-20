@@ -8,11 +8,12 @@ This repository builds and maintains a local, searchable K–12 educational imag
 
 ## 🏗️ System Architecture: How It Works
 
-The system is broken down into three main phases:
+The system is broken down into four main phases:
 
 1. **Data Ingestion (`wikimedia_ingest.py`):** Fetches file metadata from Wikimedia via keyword search or by crawling categories. It downloads images, rasterizes SVGs, resizes them, sanitizes the metadata, and filters out non-image MIME types.
-2. **Vector Storage (`init_db.py` & ChromaDB):** Uses `OpenCLIPEmbeddingFunction` to convert images into mathematical vectors. It inserts the image file URIs and metadata into a persistent ChromaDB collection (`k12_education_images`), while saving actual images locally to `./k12_images/full` and `./k12_images/thumb`.
-3. **Semantic Search (`search_k12_db_optimized.py`):** Takes a natural language text query, computes its embedding, and queries ChromaDB. It then re-ranks the closest visual matches using soft signals like grade and subject metadata.
+2. **Bulk Ingestion Suite (`database/bulk_ingest.py` & `database/query.txt`):** Takes recursive SQL category dumps (`query.txt`), handles concurrent downloads via `aiohttp`, and uses a queued, thread-safe pipeline to bypass corrupt vector files (like SVGs) and batch-embed hundreds of images into ChromaDB rapidly.
+3. **Vector Storage (`init_db.py` & ChromaDB):** Uses `OpenCLIPEmbeddingFunction` to convert images into mathematical vectors. It inserts the image file URIs and metadata into a persistent ChromaDB collection (`k12_education_images`), while saving actual images locally to `./k12_images/full` and `./k12_images/thumb`.
+4. **Semantic Search (`search_k12_db_optimized.py`):** Takes a natural language text query, computes its embedding, and queries ChromaDB. It then re-ranks the closest visual matches using soft signals like grade and subject metadata.
 
 ---
 
@@ -45,14 +46,14 @@ Mode A: Keyword Search (Default)
 Use this to ingest a small batch of predefined sample topics.
 
 Bash
-python wikimedia_ingest.py --mode search --delay 4.0
+python database/wikimedia_ingest.py --mode search --delay 4.0
 Mode B: Category Crawling (Building the Math Database)
 This is the recommended workflow for collecting specific subject images, like K-12 math diagrams. Start small and increase gradually.
 
 For Mac/Linux (Bash):
 
 Bash
-python wikimedia_ingest.py --mode category \
+python database/wikimedia_ingest.py --mode category \
   --start "Category:Mathematics" \
   --max 500 \
   --delay 5.0 \
@@ -65,7 +66,7 @@ For Windows (PowerShell):
 Note: PowerShell uses backticks (`) instead of backslashes () for multiline commands.
 
 PowerShell
-python wikimedia_ingest.py --mode category `
+python database/wikimedia_ingest.py --mode category `
   --start "Category:Mathematics" `
   --max 500 `
   --delay 5.0 `
@@ -85,17 +86,27 @@ Category:Algebra
 
 Category:Mathematical notation
 
+### Mode C: Bulk SQL-Driven Ingestion
+For massive-scale scraping without relying entirely on API endpoints, you can utilize the `database/` suite:
+1. Run the recursive CTE SQL query inside `database/query.txt` against a Wikimedia database replica.
+2. Export the result list to `math_filenames.txt`.
+3. Run the concurrent queuing pipeline:
+```bash
+python database/bulk_ingest.py
+```
+This mode utilizes a custom Producer/Consumer threading architecture to process and batch-upload images into ChromaDB rapidly and safely.
+
 🔍 Searching the Database
 Once you have images downloaded and embedded, you can query your local database. Output includes file paths, subjects, grade ranges, licenses, and attributions.
 
 Basic Search:
 
 Bash
-python search_k12_db_optimized.py "water cycle diagram" --n 6
+python database/search_k12_db.py "water cycle diagram" --n 6
 Filtered Search (Subject & Grade soft re-rank):
 
 Bash
-python search_k12_db_optimized.py "fractions pie chart" --grade 4 --subject Math --n 8
+python database/search_k12_db.py "fractions pie chart" --grade 4 --subject Math --n 8
 ⚠️ Common Troubleshooting
 Terminal Error: Missing expression after unary operator '--' or Unexpected token:
 
