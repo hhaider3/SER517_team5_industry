@@ -11,9 +11,8 @@ This repository builds and maintains a local, searchable K–12 educational imag
 The system is broken down into three main phases:
 
 1. **Data Ingestion (`wikimedia_ingest.py`):** Fetches file metadata from Wikimedia via keyword search or by crawling categories. It downloads images, rasterizes SVGs, resizes them, sanitizes the metadata, and filters out non-image MIME types.
-2. **Bulk Ingestion Suite (`database/bulk_ingest.py` & `database/query.txt`):** Takes recursive SQL category dumps (`query.txt`), handles concurrent downloads via `aiohttp`, and uses a queued, thread-safe pipeline to bypass corrupt vector files (like SVGs) and batch-embed hundreds of images into ChromaDB rapidly.
-3. **Vector Storage (`init_db.py` & ChromaDB):** Uses `OpenCLIPEmbeddingFunction` to convert images into mathematical vectors. It inserts the image file URIs and metadata into a persistent ChromaDB collection (`k12_education_images`), while saving actual images locally to `./k12_images/full` and `./k12_images/thumb`.
-4. **Semantic Search (`search_k12_db_optimized.py`):** Takes a natural language text query, computes its embedding, and queries ChromaDB. It then re-ranks the closest visual matches using soft signals like grade and subject metadata.
+2. **Vector Storage (`init_db.py` & ChromaDB):** Uses `OpenCLIPEmbeddingFunction` to convert images into mathematical vectors. It inserts the image file URIs and metadata into a persistent ChromaDB collection (`k12_education_images`), while saving actual images locally to `./k12_images/full` and `./k12_images/thumb`.
+3. **Semantic Search (`search_k12_db_optimized.py`):** Takes a natural language text query, computes its embedding, and queries ChromaDB. It then re-ranks the closest visual matches using soft signals like grade and subject metadata.
 
 ---
 
@@ -53,7 +52,7 @@ This is the recommended workflow for collecting specific subject images, like K-
 For Mac/Linux (Bash):
 
 Bash
-python database/wikimedia_ingest.py --mode category \
+python wikimedia_ingest.py --mode category \
   --start "Category:Mathematics" \
   --max 500 \
   --delay 5.0 \
@@ -66,7 +65,7 @@ For Windows (PowerShell):
 Note: PowerShell uses backticks (`) instead of backslashes () for multiline commands.
 
 PowerShell
-python database/wikimedia_ingest.py --mode category `
+python wikimedia_ingest.py --mode category `
   --start "Category:Mathematics" `
   --max 500 `
   --delay 5.0 `
@@ -86,16 +85,6 @@ Category:Algebra
 
 Category:Mathematical notation
 
-### Mode C: Bulk SQL-Driven Ingestion
-For massive-scale scraping without relying entirely on API endpoints, you can utilize the `database/` suite:
-1. Run the recursive CTE SQL query inside `database/query.txt` against a Wikimedia database replica.
-2. Export the result list to `math_filenames.txt`.
-3. Run the concurrent queuing pipeline:
-```bash
-python database/bulk_ingest.py
-```
-This mode utilizes a custom Producer/Consumer threading architecture to process and batch-upload images into ChromaDB rapidly and safely.
-
 🔍 Searching the Database
 Once you have images downloaded and embedded, you can query your local database. Output includes file paths, subjects, grade ranges, licenses, and attributions.
 
@@ -106,69 +95,39 @@ python search_k12_db_optimized.py "water cycle diagram" --n 6
 Filtered Search (Subject & Grade soft re-rank):
 
 Bash
-python search_k12_db_optimized.py "fractions pie chart"
---grade 4 --subject Math --n 8
+python search_k12_db_optimized.py "fractions pie chart" --grade 4 --subject Math --n 8
 ⚠️ Common Troubleshooting
-Terminal Error: Missing expression after unary operator
-'--' or Unexpected token:
+Terminal Error: Missing expression after unary operator '--' or Unexpected token:
 
-Multi-modal (Image-to-Image) Search:
-Instead of a text query, you can pass a local image file
-to find visually and semantically similar images in the
-database.
+Cause: You are running a Bash-formatted multiline command (using \) inside Windows PowerShell.
 
-Bash
-python database/search_k12_db.py --image path/to/image.jpg
---n 5
-
-⚠️ Common Troubleshooting
-Terminal Error: Missing expression after unary operator
-'--' or Unexpected token:
-
-Cause: You are running a Bash-formatted multiline command
-(using \) inside Windows PowerShell.
-
-Fix: Either write the command on a single continuous line,
-or replace all trailing backslashes (\) with backticks (`).
+Fix: Either write the command on a single continuous line, or replace all trailing backslashes (\) with backticks (`).
 
 Terminal Error: DOWNLOAD RETRY or DOWNLOAD FAIL 429:
 
 Cause: Wikimedia is rate-limiting your connection.
 
-Fix: Increase the --delay parameter to 8.0 or 12.0 seconds
-and reduce the --thumb-width.
+Fix: Increase the --delay parameter to 8.0 or 12.0 seconds and reduce the --thumb-width.
 
 Terminal Error: PIL.UnidentifiedImageError on resize:
 
-Cause: Caused by downloading non-image blobs or incomplete
-downloads.
+Cause: Caused by downloading non-image blobs or incomplete downloads.
 
-Fix: The script handles this safely and skips the image,
-but increasing the --delay can prevent incomplete
-downloads in the future.
+Fix: The script handles this safely and skips the image, but increasing the --delay can prevent incomplete downloads in the future.
 
 Terminal Error: DB ADD FAIL messages:
 
-Cause: Often caused by incorrect metadata types being
-passed to ChromaDB.
+Cause: Often caused by incorrect metadata types being passed to ChromaDB.
 
-Fix: The current script automatically sanitizes metadata
-to avoid this, but check the error log output to see if an
-unexpected string format slipped through.
+Fix: The current script automatically sanitizes metadata to avoid this, but check the error log output to see if an unexpected string format slipped through.
 
 HuggingFace rate warnings:
 
-Cause: Downloading the OpenCLIP model without
-authentication.
+Cause: Downloading the OpenCLIP model without authentication.
 
 Fix: Set HF_TOKEN in your environment variables.
 
 ⚖️ Licensing & Storage
-Licensing: The pipeline strictly filters images to ensure
-the license contains allowed substrings: public domain,
-cc0, cc by, or cc by-sa. You are responsible for showing
-proper attribution when redistributing.
+Licensing: The pipeline strictly filters images to ensure the license contains allowed substrings: public domain, cc0, cc by, or cc by-sa. You are responsible for showing proper attribution when redistributing.
 
-Storage: Full images are up to 1200px; thumbnails are
-256px. Rough sizing estimates: 10k images ≈ 3–10 GB total;
-100k images ≈ 30–100 GB total.
+Storage: Full images are up to 1200px; thumbnails are 256px. Rough sizing estimates: 10k images ≈ 3–10 GB total; 100k images ≈ 30–100 GB total.
