@@ -142,3 +142,26 @@ Fix: Set HF_TOKEN in your environment variables.
 Licensing: The pipeline strictly filters images to ensure the license contains allowed substrings: public domain, cc0, cc by, or cc by-sa. You are responsible for showing proper attribution when redistributing.
 
 Storage: Full images are up to 1200px; thumbnails are 256px. Rough sizing estimates: 10k images ≈ 3–10 GB total; 100k images ≈ 30–100 GB total.
+
+
+### Example Search Output
+
+When running a basic search for `"water cycle diagram"`, the console will output the closest semantic matches along with their metadata:
+
+```text
+Query: "water cycle diagram"
+Retrieving top 3 matches...
+
+1. File: ./k12_images/full/Water_Cycle_Diagram.jpg
+   Score: 0.89
+   Subject: Science
+   Grade Range: 3-6
+   License: CC BY-SA 4.0
+   Attribution: Wikimedia Commons
+
+2. File: ./k12_images/full/Hydrologic_Cycle.png
+   Score: 0.85
+   Subject: Science
+   Grade Range: 4-8
+   License: Public Domain
+   Attribution: USGS / Wikimedia Commons
