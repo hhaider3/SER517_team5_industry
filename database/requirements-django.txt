@@ -1,0 +1,17 @@
+# Django runtime requirements
+Django>=4.2,<5.0
+python-dotenv==1.1.1
+PyMySQL==1.1.1
+cryptography>=42,<46
+mysql-connector-python==9.3.0
+openai==2.6.1
+requests==2.32.3
+Markdown==3.7
+pymdown-extensions==10.12
+nltk==3.9.1
+Werkzeug==3.1.1
+
+# K-12 Image search dependencies
+chromadb>=0.4.24
+open-clip-torch>=2.20.0
+Pillow>=10.0.0
