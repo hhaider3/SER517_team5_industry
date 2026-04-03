@@ -1,3 +1,5 @@
+*Some files in this repo serve as a copy of the files we've changes in the main chatbot repo. They can be accessed here https://github.com/johnleddoMETY/chatbot/tree/image-integration
+
 # SER517_team5_industry - K-12 Image Vector Database
 
 A project for SER 517 by Team 5 (industry). 
@@ -8,7 +10,7 @@ This repository builds and maintains a local, searchable K–12 educational imag
 
 ## 🏗️ System Architecture: How It Works
 
-The system is broken down into three main phases:
+The system is broken down into four main phases:
 
 1. **Data Ingestion (`wikimedia_ingest.py`):** Fetches file metadata from Wikimedia via keyword search or by crawling categories. It downloads images, rasterizes SVGs, resizes them, sanitizes the metadata, and filters out non-image MIME types.
 2. **Bulk Ingestion Suite (`database/bulk_ingest.py` & `database/query.txt`):** Takes recursive SQL category dumps (`query.txt`), handles concurrent downloads via `aiohttp`, and uses a queued, thread-safe pipeline to bypass corrupt vector files (like SVGs) and batch-embed hundreds of images into ChromaDB rapidly.
@@ -46,7 +48,7 @@ Mode A: Keyword Search (Default)
 Use this to ingest a small batch of predefined sample topics.
 
 Bash
-python wikimedia_ingest.py --mode search --delay 4.0
+python database/wikimedia_ingest.py --mode search --delay 4.0
 Mode B: Category Crawling (Building the Math Database)
 This is the recommended workflow for collecting specific subject images, like K-12 math diagrams. Start small and increase gradually.
 
@@ -102,73 +104,66 @@ Once you have images downloaded and embedded, you can query your local database.
 Basic Search:
 
 Bash
-python search_k12_db_optimized.py "water cycle diagram" --n 6
+python database/search_k12_db.py "water cycle diagram" --n 6
 Filtered Search (Subject & Grade soft re-rank):
 
 Bash
-python search_k12_db_optimized.py "fractions pie chart"
---grade 4 --subject Math --n 8
+python database/search_k12_db.py "fractions pie chart" --grade 4 --subject Math --n 8
 ⚠️ Common Troubleshooting
-Terminal Error: Missing expression after unary operator
-'--' or Unexpected token:
+Terminal Error: Missing expression after unary operator '--' or Unexpected token:
 
-Multi-modal (Image-to-Image) Search:
-Instead of a text query, you can pass a local image file
-to find visually and semantically similar images in the
-database.
+Cause: You are running a Bash-formatted multiline command (using \) inside Windows PowerShell.
 
-Bash
-python database/search_k12_db.py --image path/to/image.jpg
---n 5
-
-⚠️ Common Troubleshooting
-Terminal Error: Missing expression after unary operator
-'--' or Unexpected token:
-
-Cause: You are running a Bash-formatted multiline command
-(using \) inside Windows PowerShell.
-
-Fix: Either write the command on a single continuous line,
-or replace all trailing backslashes (\) with backticks (`).
+Fix: Either write the command on a single continuous line, or replace all trailing backslashes (\) with backticks (`).
 
 Terminal Error: DOWNLOAD RETRY or DOWNLOAD FAIL 429:
 
 Cause: Wikimedia is rate-limiting your connection.
 
-Fix: Increase the --delay parameter to 8.0 or 12.0 seconds
-and reduce the --thumb-width.
+Fix: Increase the --delay parameter to 8.0 or 12.0 seconds and reduce the --thumb-width.
 
 Terminal Error: PIL.UnidentifiedImageError on resize:
 
-Cause: Caused by downloading non-image blobs or incomplete
-downloads.
+Cause: Caused by downloading non-image blobs or incomplete downloads.
 
-Fix: The script handles this safely and skips the image,
-but increasing the --delay can prevent incomplete
-downloads in the future.
+Fix: The script handles this safely and skips the image, but increasing the --delay can prevent incomplete downloads in the future.
 
 Terminal Error: DB ADD FAIL messages:
 
-Cause: Often caused by incorrect metadata types being
-passed to ChromaDB.
+Cause: Often caused by incorrect metadata types being passed to ChromaDB.
 
-Fix: The current script automatically sanitizes metadata
-to avoid this, but check the error log output to see if an
-unexpected string format slipped through.
+Fix: The current script automatically sanitizes metadata to avoid this, but check the error log output to see if an unexpected string format slipped through.
 
 HuggingFace rate warnings:
 
-Cause: Downloading the OpenCLIP model without
-authentication.
+Cause: Downloading the OpenCLIP model without authentication.
 
 Fix: Set HF_TOKEN in your environment variables.
 
 ⚖️ Licensing & Storage
-Licensing: The pipeline strictly filters images to ensure
-the license contains allowed substrings: public domain,
-cc0, cc by, or cc by-sa. You are responsible for showing
-proper attribution when redistributing.
+Licensing: The pipeline strictly filters images to ensure the license contains allowed substrings: public domain, cc0, cc by, or cc by-sa. You are responsible for showing proper attribution when redistributing.
 
-Storage: Full images are up to 1200px; thumbnails are
-256px. Rough sizing estimates: 10k images ≈ 3–10 GB total;
-100k images ≈ 30–100 GB total.
+Storage: Full images are up to 1200px; thumbnails are 256px. Rough sizing estimates: 10k images ≈ 3–10 GB total; 100k images ≈ 30–100 GB total.
+
+
+### Example Search Output
+
+When running a basic search for `"water cycle diagram"`, the console will output the closest semantic matches along with their metadata:
+
+```text
+Query: "water cycle diagram"
+Retrieving top 3 matches...
+
+1. File: ./k12_images/full/Water_Cycle_Diagram.jpg
+   Score: 0.89
+   Subject: Science
+   Grade Range: 3-6
+   License: CC BY-SA 4.0
+   Attribution: Wikimedia Commons
+
+2. File: ./k12_images/full/Hydrologic_Cycle.png
+   Score: 0.85
+   Subject: Science
+   Grade Range: 4-8
+   License: Public Domain
+   Attribution: USGS / Wikimedia Commons
