@@ -1,6 +1,6 @@
-# SER517_team5_industry - K-12 Image Vector Database
+*Some files in this repo serve as a copy of the files we've changes in the main chatbot repo. They can be accessed here https://github.com/johnleddoMETY/chatbot/tree/image-integration
 
-#Some files in this repo serve as a copy of the files we've changes in the main chatbot repo. They can be accessed here https://github.com/johnleddoMETY/chatbot/tree/image-integration
+# SER517_team5_industry - K-12 Image Vector Database
 
 A project for SER 517 by Team 5 (industry). 
 
