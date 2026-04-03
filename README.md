@@ -1,5 +1,7 @@
 # SER517_team5_industry - K-12 Image Vector Database
 
+#Some files in this repo serve as a copy of the files we've changes in the main chatbot repo. They can be accessed here https://github.com/johnleddoMETY/chatbot/tree/image-integration
+
 A project for SER 517 by Team 5 (industry). 
 
 This repository builds and maintains a local, searchable K–12 educational image database using the Wikimedia Commons API, ChromaDB, OpenCLIP, and local image storage.
