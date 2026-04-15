@@ -39,7 +39,7 @@ def search_wikimedia_images(
 
     try:
         # Clean up the question to make a better image search query
-        clean = re.sub(r"\b(what|how|why|when|where|who|is|are|do|does|can|could|would|should|the|a|an|of|in|to|for|and|or|it|this|that|please|explain|tell|me|about|show)\b", "", query_text.lower(), flags=re.IGNORECASE)
+        clean = re.sub(r"\b(what|how|why|when|where|who|is|are|do|does|can|could|would|should|the|a|an|of|in|to|for|and|or|it|this|that|please|explain|tell|me|about|show|look|like|picture|pictures|image|images|some|any|much|many)\b", "", query_text.lower(), flags=re.IGNORECASE)
         clean = re.sub(r"\s+", " ", clean).strip()
         search_query = f"{clean} diagram" if clean else query_text
 
@@ -66,6 +66,15 @@ def search_wikimedia_images(
         data = resp.json()
 
         pages = (data.get("query") or {}).get("pages") or []
+        
+        # If very few results and we used "diagram", retry without it
+        if len(pages) < 2 and search_query != clean and clean:
+            params["gsrsearch"] = clean
+            resp = requests.get(_API_URL, params=params, headers={"User-Agent": "AdaptiveTutorBot/1.0 (educational chatbot)"}, timeout=_TIMEOUT)
+            if resp.ok:
+                data = resp.json()
+                pages = (data.get("query") or {}).get("pages") or []
+
         results: List[Dict[str, Any]] = []
 
         for page in pages:
