@@ -12,9 +12,8 @@ from ava_apps.chat.shared import conversation_memory_service
 from ava_apps.core.services.database_service import db_service
 from ava_apps.learning_goal.services import learning_goal_service
 from ava_apps.chat.general_chat.services.answer_generation_service import get_ai_answer
-from ava_apps.chat.general_chat.services.image_search_service import search_images, build_image_gallery_html
-from ava_apps.chat.general_chat.services.wikimedia_image_service import search_wikimedia_images, build_wikimedia_gallery_html
 from ava_apps.chat.general_chat.services.image_relevance_service import should_show_images
+from ava_apps.chat.general_chat.services.image_aggregator_service import search_all_images
 from ava_apps.self_assessment.services.self_assessment_evaluation_service import get_latest_evaluation_for_user
 
 from ..check_understanding.key_points_service import generate_key_points
@@ -172,16 +171,11 @@ def answer_question_flow(
     md = Markdown(extensions=["extra", makeExtension(generic=True)])
     answer_html = md.convert(answer)
 
-    # --- Image search integration (Wikimedia → ChromaDB fallback) ---
+    # --- Multi-source image search (Wikimedia + Wikipedia + Openverse + local) ---
     # Only fetch images when the question actually benefits from visuals
     if should_show_images(question):
         try:
-            images = search_wikimedia_images(query_text=question, n_results=3)
-            gallery_html = build_wikimedia_gallery_html(images) if images else ""
-            if not gallery_html:
-                # Fallback to local ChromaDB if Wikimedia returns nothing
-                local_images = search_images(query_text=question, n_results=3)
-                gallery_html = build_image_gallery_html(local_images)
+            gallery_html = search_all_images(query_text=question, n_results=6)
             if gallery_html:
                 answer_html += gallery_html
         except Exception as exc:
