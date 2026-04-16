@@ -10,7 +10,7 @@ The ChromaDB collection is lazily initialised once per process.
 All errors are caught so the chat flow is never broken.
 """
 
-from __future__ import annotations
+from _future_ import annotations
 
 import logging
 import os
@@ -20,24 +20,16 @@ from typing import Any, Dict, List, Optional
 
 from django.conf import settings
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 # ---------------------------------------------------------------------------
 # Lazy singleton for the ChromaDB collection
 # ---------------------------------------------------------------------------
 _collection = None
-_init_failed = False
 
 
 def _get_collection():
     """Return the ChromaDB collection, initialising on first call."""
-    global _collection, _init_failed
-
-    if _collection is not None:
-        return _collection
-    if _init_failed:
-        return None
-
     try:
         import chromadb
         from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
@@ -49,13 +41,11 @@ def _get_collection():
 
         db_path = getattr(settings, "IMAGE_DB_PATH", None)
         if not db_path:
-            logger.warning("IMAGE_DB_PATH is not set in Django settings – image search disabled.")
-            _init_failed = True
+            logger.debug("IMAGE_DB_PATH is not set – image search disabled.")
             return None
 
         if not Path(db_path).exists():
-            logger.warning("IMAGE_DB_PATH %s does not exist – image search disabled.", db_path)
-            _init_failed = True
+            logger.debug("IMAGE_DB_PATH %s does not exist yet.", db_path)
             return None
 
         client = chromadb.PersistentClient(path=str(db_path))
@@ -68,17 +58,16 @@ def _get_collection():
         if ImageLoader:
             kwargs["data_loader"] = ImageLoader()
 
-        _collection = client.get_or_create_collection(**kwargs)
+        collection = client.get_or_create_collection(**kwargs)
         logger.info(
             "K-12 image collection ready – %d images in %s",
-            _collection.count(),
+            collection.count(),
             db_path,
         )
-        return _collection
+        return collection
 
     except Exception as exc:
         logger.error("Failed to initialise K-12 image search: %s", exc)
-        _init_failed = True
         return None
 
 
@@ -112,11 +101,11 @@ def _combine_score(distance: float, penalty: float) -> float:
 # URI → Django-servable URL
 # ---------------------------------------------------------------------------
 def _uri_to_url(uri: str, thumb: bool = False) -> Optional[str]:
-    """Convert an on-disk image path into a ``/media/…`` URL.
+    """Convert an on-disk image path into a `/media/…` URL.
 
-    ChromaDB stores URIs like ``/abs/path/to/k12_images/full/abc123.jpg``.
-    We need to make this relative to ``MEDIA_ROOT`` so Django can serve it.
-    If *thumb* is True we swap ``/full/`` → ``/thumb/`` in the path.
+    ChromaDB stores URIs like `/abs/path/to/k12_images/full/abc123.jpg`.
+    We need to make this relative to `MEDIA_ROOT` so Django can serve it.
+    If thumb is True we swap `/full/` → `/thumb/` in the path.
     """
     media_root = getattr(settings, "MEDIA_ROOT", None)
     if not media_root:
@@ -162,7 +151,7 @@ def search_images(
     subject: Optional[str] = None,
     grade: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    """Search the K-12 image database for images related to *query_text*.
+    """Search the K-12 image database for images related to query_text.
 
     Returns a list of dicts (may be empty):
         [{"url": str, "thumb_url": str, "subject": str, "topic": str, "score": float}, …]
@@ -237,6 +226,8 @@ def search_images(
         # Convert to output dicts
         results = []
         for score, uri, md in ranked:
+            if score < 0.55:  # Filter out irrelevant fallbacks 
+                continue
             full_url = _uri_to_url(uri, thumb=False)
             thumb_url = _uri_to_url(uri, thumb=True) or full_url
             if not full_url:
@@ -260,7 +251,7 @@ def search_images(
 def build_image_gallery_html(images: List[Dict[str, Any]]) -> str:
     """Render a list of image result dicts into an HTML gallery block.
 
-    Returns an empty string if *images* is empty.
+    Returns an empty string if images is empty.
     """
     if not images:
         return ""
