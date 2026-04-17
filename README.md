@@ -1,8 +1,6 @@
-*Some files in this repo serve as a copy of the files we've changes in the main chatbot repo. They can be accessed here https://github.com/johnleddoMETY/chatbot/tree/image-integration
+***Some files in this repo serve as a copy of the files we've changes in the main chatbot repo. They can be accessed here https://github.com/johnleddoMETY/chatbot/tree/image-integration***
 
 # SER517_team5_industry - K-12 Image Vector Database
-
-A project for SER 517 by Team 5 (industry). 
 
 This repository builds and maintains a local, searchable K–12 educational image database using the Wikimedia Commons API, ChromaDB, OpenCLIP, and local image storage.
 
@@ -13,9 +11,42 @@ This repository builds and maintains a local, searchable K–12 educational imag
 The system is broken down into four main phases:
 
 1. **Data Ingestion (`wikimedia_ingest.py`):** Fetches file metadata from Wikimedia via keyword search or by crawling categories. It downloads images, rasterizes SVGs, resizes them, sanitizes the metadata, and filters out non-image MIME types.
-2. **Bulk Ingestion Suite (`database/bulk_ingest.py` & `database/query.txt`):** Takes recursive SQL category dumps (`query.txt`), handles concurrent downloads via `aiohttp`, and uses a queued, thread-safe pipeline to bypass corrupt vector files (like SVGs) and batch-embed hundreds of images into ChromaDB rapidly.
+2. **Bulk Ingestion Suite (`database/bulk_ingest.py` & `database/query.txt`):** Takes recursive SQL category dumps (`query.txt`), performs high-throughput asynchronous downloads using `aiohttp`, and utilizes a Producer–Consumer queue with thread offloading for CPU-bound tasks (PIL processing, OpenCLIP embeddings). This design prevents event loop blocking and enables efficient batch ingestion into ChromaDB at scale.
 3. **Vector Storage (`init_db.py` & ChromaDB):** Uses `OpenCLIPEmbeddingFunction` to convert images into mathematical vectors. It inserts the image file URIs and metadata into a persistent ChromaDB collection (`k12_education_images`), while saving actual images locally to `./k12_images/full` and `./k12_images/thumb`.
 4. **Semantic Search (`search_k12_db_optimized.py`):** Takes a natural language text query, computes its embedding, and queries ChromaDB. It then re-ranks the closest visual matches using soft signals like grade and subject metadata.
+
+---
+
+## ⚡ Pipeline Design & Performance
+
+**Asynchronous Ingestion**
+- Uses `aiohttp` and `asyncio` for non-blocking I/O operations  
+- Supports concurrent image downloads for improved throughput  
+
+**Multithreaded Processing**
+- CPU-intensive tasks (image preprocessing, embedding generation) are executed in background threads  
+- Prevents blocking of the async event loop  
+
+**Offline SQL-Driven Pipeline**
+- Uses Wikimedia SQL dumps for large-scale ingestion  
+- Recursive CTE queries traverse category hierarchies  
+- MD5-based reconstruction generates direct image URLs  
+- Reduces dependency on API rate limits during bulk ingestion  
+
+**Throughput Characteristics**
+- Designed to handle large datasets (10k–100k+ images)  
+- Batch embedding and storage into ChromaDB  
+- Stable ingestion with retry and backoff strategies
+
+---
+
+## 🧠 Key Engineering Decisions
+
+- Use of vector embeddings (OpenCLIP) for semantic search instead of keyword matching  
+- Adoption of asynchronous I/O for scalable data ingestion  
+- Hybrid async + multithreading model to balance I/O and CPU workloads  
+- Use of offline SQL dumps to enable large-scale ingestion without API bottlenecks  
+- Metadata-aware re-ranking for improved educational relevance
 
 ---
 
@@ -93,60 +124,89 @@ For massive-scale scraping without relying entirely on API endpoints, you can ut
 1. Run the recursive CTE SQL query inside `database/query.txt` against a Wikimedia database replica.
 2. Export the result list to `math_filenames.txt`.
 3. Run the concurrent queuing pipeline:
-```bash
+
 python database/bulk_ingest.py
 ```
-This mode utilizes a custom Producer/Consumer threading architecture to process and batch-upload images into ChromaDB rapidly and safely.
+This mode utilizes a hybrid async + Producer/Consumer threading architecture to process downloads concurrently while offloading embedding and image processing tasks, enabling efficient and stable batch ingestion into ChromaDB.
 
 🔍 Searching the Database
 Once you have images downloaded and embedded, you can query your local database. Output includes file paths, subjects, grade ranges, licenses, and attributions.
 
 Basic Search:
-
-Bash
+```bash
 python database/search_k12_db.py "water cycle diagram" --n 6
+```
+
 Filtered Search (Subject & Grade soft re-rank):
-
-Bash
+```bash
 python database/search_k12_db.py "fractions pie chart" --grade 4 --subject Math --n 8
-⚠️ Common Troubleshooting
-Terminal Error: Missing expression after unary operator '--' or Unexpected token:
+```
+---
 
-Cause: You are running a Bash-formatted multiline command (using \) inside Windows PowerShell.
+## ⚖️ Licensing & Storage
 
-Fix: Either write the command on a single continuous line, or replace all trailing backslashes (\) with backticks (`).
+### Licensing
+Allowed licenses:
+- Public Domain  
+- CC0  
+- CC BY  
+- CC BY-SA
 
-Terminal Error: DOWNLOAD RETRY or DOWNLOAD FAIL 429:
+You are responsible for providing proper attribution when redistributing images.
 
-Cause: Wikimedia is rate-limiting your connection.
+### Storage
+- Full images: up to **1200px**  
+- Thumbnails: **256px**
 
-Fix: Increase the --delay parameter to 8.0 or 12.0 seconds and reduce the --thumb-width.
+Estimated storage requirements:
+- 10k images → ~3–10 GB  
+- 100k images → ~30–100 GB
 
-Terminal Error: PIL.UnidentifiedImageError on resize:
+---
 
-Cause: Caused by downloading non-image blobs or incomplete downloads.
+## ⚠️ Common Troubleshooting
 
-Fix: The script handles this safely and skips the image, but increasing the --delay can prevent incomplete downloads in the future.
+### ❌ PowerShell Syntax Errors
+**Error:** `Missing expression after unary operator '--'` or `Unexpected token`
 
-Terminal Error: DB ADD FAIL messages:
+- **Cause:** Running Bash-style multiline commands (`\`) in Windows PowerShell  
+- **Fix:**  
+  - Use a single-line command, OR  
+  - Replace `\` with backticks `` ` `` for multiline commands in PowerShell  
 
-Cause: Often caused by incorrect metadata types being passed to ChromaDB.
+### ❌ Download Failures / HTTP 429
+**Error:** `DOWNLOAD RETRY` or `DOWNLOAD FAIL 429`
 
-Fix: The current script automatically sanitizes metadata to avoid this, but check the error log output to see if an unexpected string format slipped through.
+- **Cause:** Wikimedia rate limiting  
+- **Fix:**  
+  - Increase `--delay` to `8.0` or `12.0`  
+  - Reduce `--thumb-width`  
 
-HuggingFace rate warnings:
+### ❌ Image Processing Errors
+**Error:** `PIL.UnidentifiedImageError`
 
-Cause: Downloading the OpenCLIP model without authentication.
+- **Cause:** Corrupted downloads or non-image files  
+- **Fix:**  
+  - Automatically skipped by the pipeline  
+  - Increasing `--delay` can reduce occurrence  
 
-Fix: Set HF_TOKEN in your environment variables.
+### ❌ ChromaDB Insert Failures
+**Error:** `DB ADD FAIL`
 
-⚖️ Licensing & Storage
-Licensing: The pipeline strictly filters images to ensure the license contains allowed substrings: public domain, cc0, cc by, or cc by-sa. You are responsible for showing proper attribution when redistributing.
+- **Cause:** Invalid or improperly formatted metadata  
+- **Fix:**  
+  - Metadata is sanitized automatically  
+  - Check logs for unexpected formats if errors persist  
 
-Storage: Full images are up to 1200px; thumbnails are 256px. Rough sizing estimates: 10k images ≈ 3–10 GB total; 100k images ≈ 30–100 GB total.
+### ❌ HuggingFace Rate Warnings
+- **Cause:** OpenCLIP model downloads without authentication  
+- **Fix:**  
+  ```bash
+  export HF_TOKEN="your_huggingface_token_here"
 
+---
 
-### Example Search Output
+## Example Search Output
 
 When running a basic search for `"water cycle diagram"`, the console will output the closest semantic matches along with their metadata:
 
