@@ -2,6 +2,9 @@
 
 # Adaptive Personal Assistant (Django)
 
+![Chatbot interface screenshot](assets/chatbot_interface.png)
+*Chatbot interface (tutor answer + related images).* 
+
 ## Project Overview
 
 This repository contains a Django-based adaptive tutoring web application.
@@ -280,18 +283,12 @@ Related function:
 
 Template:
 
-- `adaptive-virtual-assistant-beta/templates_django/accounts/register.html`
-
-Main functions:
-
 - `adaptive-virtual-assistant-beta/ava_apps/main/views.py -> register_view()`
   - Handles registration form submit, creates the app user, then auto-logs in the user
 - `adaptive-virtual-assistant-beta/ava_apps/accounts/services/registration_service.py -> register_new_user()`
   - Checks uniqueness and creates a new user profile
 - `adaptive-virtual-assistant-beta/ava_apps/accounts/services/registration_service.py -> _build_new_user_payload()`
   - Builds the default user payload stored in MySQL
-- `adaptive-virtual-assistant-beta/ava_apps/core/services/database_service.py -> create_user()`
-  - Persists the user record and related list data
 
 ### 3. Login (`/auth/login`)
 
@@ -412,13 +409,6 @@ Main functions:
 Template:
 
 - `adaptive-virtual-assistant-beta/templates_django/chat/page.html`
-- `adaptive-virtual-assistant-beta/templates_django/chat/input_form.html`
-- `adaptive-virtual-assistant-beta/templates_django/chat/load_more.html`
-- `adaptive-virtual-assistant-beta/templates_django/chat/knowledge_check_panel.html`
-- `adaptive-virtual-assistant-beta/templates_django/learning_goal/sidebar.html`
-
-Main functions:
-
 - `adaptive-virtual-assistant-beta/ava_apps/main/views.py -> chat()`
   - Displays the chat page for the active learning goal
 - `adaptive-virtual-assistant-beta/ava_apps/chat/general_chat/page_service.py -> resolve_chat_access()`
