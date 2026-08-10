@@ -1,4 +1,4 @@
-MAIN REPO - https://github.com/johnleddoMETY/chatbot/tree/Django-Version
+
 
 # Adaptive Personal Assistant (Django)
 
@@ -40,6 +40,9 @@ Tech stack:
 - HTML templates + static CSS
 
 Notes:
+
+MAIN REPO - https://github.com/johnleddoMETY/chatbot/tree/Django-Version
+This repo only contains the changes we did to the main repository.
 
 - Database schema is managed by Django models in `adaptive-virtual-assistant-beta/ava_apps/main/models.py`
 - Migrations live in `adaptive-virtual-assistant-beta/ava_apps/main/migrations/`
