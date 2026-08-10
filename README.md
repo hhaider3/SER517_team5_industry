@@ -1,3 +1,5 @@
+MAIN REPO - https://github.com/johnleddoMETY/chatbot/tree/Django-Version
+
 # Adaptive Personal Assistant (Django)
 
 ![Chatbot interface screenshot](assets/K12_Chatbot.png) 
